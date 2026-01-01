@@ -1,0 +1,12 @@
+{
+  "name": "shopping-list-cleanup",
+  "version": "1.0.0",
+  "description": "Nightly cleanup for Notion shopping list",
+  "main": "cleanup.js",
+  "scripts": {
+    "start": "node cleanup.js"
+  },
+  "dependencies": {
+    "@notionhq/client": "^3.9.0"
+  }
+}
