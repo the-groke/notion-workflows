@@ -18,14 +18,15 @@ async function deleteCheckedTodos(parentBlockId) {
       for (const block of response.results) {
         if (block.type === "to_do" && block.to_do.checked) {
           await notion.blocks.delete({ block_id: block.id });
-          console.log(`Deleted: ${block.to_do.text.map(t => t.plain_text).join(" ")}`);
+          const textContent = block.to_do.text?.map(t => t.plain_text).join(" ") || "<empty>";
+          console.log(`Deleted: ${textContent}`);
         }
 
-        // Recursively process children (for headings with nested blocks)
         if (block.has_children) {
           await deleteCheckedTodos(block.id);
         }
       }
+
 
       cursor = response.has_more ? response.next_cursor : undefined;
     } while (cursor);
