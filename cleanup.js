@@ -39,32 +39,39 @@ const processNestedBlocks = async (block) => {
   }
 };
 
-const hasTodoAfterHeading = (allBlocks, headingIndex) => {
+const findTodoOrParagraphsAfterHeading = (allBlocks, headingIndex) => {
   let j = headingIndex + 1;
+  const paragraphs = [];
 
   while (j < allBlocks.length) {
     const nextBlock = allBlocks[j];
 
     if (nextBlock.type === "paragraph") {
+      paragraphs.push(nextBlock);
       j++;
       continue;
     }
 
     if (nextBlock.type === "to_do") {
-      return true;
+      return { hasTodo: true, paragraphs };
     }
 
     if (nextBlock.type.startsWith("heading_")) {
-      return false;
+      return { hasTodo: false, paragraphs };
     }
 
-    return false;
+    return { hasTodo: false, paragraphs };
   }
 
-  return false;
+  return { hasTodo: false, paragraphs };
 };
 
-const addEmptyTodoAfterHeading = async (parentBlockId, headingBlock) => {
+const addEmptyTodoAfterHeading = async (parentBlockId, headingBlock, paragraphsToDelete = []) => {
+  // Delete any empty paragraphs first
+  for (const para of paragraphsToDelete) {
+    await notion.blocks.delete({ block_id: para.id });
+  }
+
   await notion.blocks.children.append({
     block_id: parentBlockId,
     children: [
@@ -88,10 +95,10 @@ const processEmptyHeadings = async (parentBlockId, allBlocks) => {
     const block = allBlocks[i];
 
     if (block.type === "heading_2") {
-      const foundTodo = hasTodoAfterHeading(allBlocks, i);
+      const { hasTodo, paragraphs } = findTodoOrParagraphsAfterHeading(allBlocks, i);
 
-      if (!foundTodo) {
-        await addEmptyTodoAfterHeading(parentBlockId, block);
+      if (!hasTodo) {
+        await addEmptyTodoAfterHeading(parentBlockId, block, paragraphs);
       }
     }
   }
