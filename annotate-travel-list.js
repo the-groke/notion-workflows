@@ -1,8 +1,9 @@
 import { Client } from "@notionhq/client";
-import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 const PAGE_ID = process.env.NOTION_PAGE_ID;
 
 if (!PAGE_ID) {
@@ -11,7 +12,7 @@ if (!PAGE_ID) {
 }
 
 // Recursively fetch all blocks
-async function getAllBlocks(blockId, allBlocks = []) {
+const getAllBlocks = async (blockId, allBlocks = []) => {
   const res = await notion.blocks.children.list({ block_id: blockId });
   
   for (const block of res.results) {
@@ -24,23 +25,24 @@ async function getAllBlocks(blockId, allBlocks = []) {
   }
   
   return allBlocks;
-}
+};
 
-// Only annotate unchecked to-do blocks
-function isEligiblePlace(block) {
+// Only annotate unchecked to-do blocks that don't already have children
+const isEligiblePlace = (block) => {
   return (
     block.type === "to_do" &&
     !block.to_do.checked &&
-    block.to_do.rich_text.length > 0
+    block.to_do.rich_text.length > 0 &&
+    !block.has_children  // Skip if already has AI-generated content
   );
-}
+};
 
-function extractText(block) {
+const extractText = (block) => {
   return block.to_do.rich_text.map(t => t.plain_text).join("").trim();
-}
+};
 
 // Annotate one place, with quota / rate-limit handling
-async function annotatePlace(block) {
+const annotatePlace = async (block) => {
   const place = extractText(block);
 
   const prompt = `
@@ -67,13 +69,18 @@ Rules:
 `;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.2
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.2,
+        maxOutputTokens: 500,
+      },
     });
 
-    const lines = response.choices[0].message.content
+    const response = result.response;
+    const text = response.text();
+    
+    const lines = text
       .split("\n")
       .filter(Boolean);
 
@@ -97,27 +104,32 @@ Rules:
 
     console.log(`✓ Annotated: ${place}`);
   } catch (err) {
-    if (err.code === "insufficient_quota" || err.status === 429) {
+    if (err.status === 429 || err.message?.includes("quota")) {
       console.warn(`⚠ Skipped AI annotation for "${place}": quota exceeded`);
     } else {
       console.error(`✗ Error annotating "${place}":`, err.message);
     }
   }
-}
+};
 
-async function run() {
+const run = async () => {
   console.log("Fetching all blocks from page...");
   const allBlocks = await getAllBlocks(PAGE_ID);
   
   const eligibleBlocks = allBlocks.filter(isEligiblePlace);
-  console.log(`Found ${eligibleBlocks.length} unchecked to-do items\n`);
+  console.log(`Found ${eligibleBlocks.length} unchecked to-do items without annotations\n`);
+
+  if (eligibleBlocks.length === 0) {
+    console.log("No items need annotation. All done!");
+    return;
+  }
 
   for (const block of eligibleBlocks) {
     await annotatePlace(block);
   }
 
   console.log("\n✓ Travel annotation complete");
-}
+};
 
 run().catch(err => {
   console.error("Unexpected error:", err);
