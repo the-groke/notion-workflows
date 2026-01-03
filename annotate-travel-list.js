@@ -11,6 +11,27 @@ if (!PAGE_ID) {
   process.exit(1);
 }
 
+// Test API key
+const testAPIKey = async () => {
+  try {
+    console.log("Testing Gemini API key...");
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: [{ text: "Say hello" }] }],
+    });
+    console.log("✓ API key works! Response:", result.response.text());
+    console.log("");
+  } catch (err) {
+    console.error("✗ API key test failed:");
+    console.error("Error code:", err.status);
+    console.error("Error message:", err.message);
+    console.error("Full error:", err);
+    process.exit(1);
+  }
+};
+
+// Helper to add delay
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 // Recursively fetch all blocks
 const getAllBlocks = async (blockId, allBlocks = []) => {
   const res = await notion.blocks.children.list({ block_id: blockId });
@@ -104,11 +125,13 @@ Rules:
 
     console.log(`✓ Annotated: ${place}`);
   } catch (err) {
-    if (err.status === 429 || err.message?.includes("quota")) {
-      console.warn(`⚠ Skipped AI annotation for "${place}": quota exceeded`);
-    } else {
-      console.error(`✗ Error annotating "${place}":`, err.message);
-    }
+    console.error(`✗ Full error for "${place}":`, {
+      status: err.status,
+      message: err.message,
+      code: err.code,
+      details: err.details,
+      stack: err.stack
+    });
   }
 };
 
@@ -126,11 +149,14 @@ const run = async () => {
 
   for (const block of eligibleBlocks) {
     await annotatePlace(block);
+    await delay(2000); // Wait 2 seconds between requests
   }
 
   console.log("\n✓ Travel annotation complete");
 };
 
+// Run with API key test first
+await testAPIKey();
 run().catch(err => {
   console.error("Unexpected error:", err);
   process.exit(1);
