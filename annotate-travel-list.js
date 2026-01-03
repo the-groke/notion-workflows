@@ -1,8 +1,8 @@
 import { Client } from "@notionhq/client";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const ai = new GoogleGenAI({});
 const PAGE_ID = process.env.NOTION_PAGE_ID;
 
 if (!PAGE_ID) {
@@ -10,22 +10,20 @@ if (!PAGE_ID) {
   process.exit(1);
 }
 
-// List available models
-const listAvailableModels = async () => {
+// Test API key
+const testAPIKey = async () => {
   try {
-    console.log("Fetching available models...\n");
-    const models = await genAI.listModels();
-    
-    console.log("Available models:");
-    for (const model of models) {
-      console.log(`- ${model.name}`);
-      console.log(`  Supported methods: ${model.supportedGenerationMethods.join(", ")}`);
-    }
+    console.log("Testing Gemini API key...");
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: "Say hello",
+    });
+    console.log("✓ API key works! Response:", response.text);
     console.log("");
-    
-    return models;
   } catch (err) {
-    console.error("Error listing models:", err);
+    console.error("✗ API key test failed:");
+    console.error("Error message:", err.message);
+    console.error("Full error:", err);
     process.exit(1);
   }
 };
@@ -64,7 +62,7 @@ const extractText = (block) => {
 };
 
 // Annotate one place
-const annotatePlace = async (block, model) => {
+const annotatePlace = async (block) => {
   const place = extractText(block);
 
   const prompt = `
@@ -91,16 +89,12 @@ Rules:
 `;
 
   try {
-    const result = await model.generateContent({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.2,
-        maxOutputTokens: 500,
-      },
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
     });
 
-    const response = result.response;
-    const text = response.text();
+    const text = response.text;
     
     const lines = text
       .split("\n")
@@ -131,22 +125,6 @@ Rules:
 };
 
 const run = async () => {
-  // First, list available models
-  const models = await listAvailableModels();
-  
-  // Find a model that supports generateContent
-  const availableModel = models.find(m => 
-    m.supportedGenerationMethods.includes("generateContent")
-  );
-  
-  if (!availableModel) {
-    console.error("No models support generateContent!");
-    process.exit(1);
-  }
-  
-  console.log(`Using model: ${availableModel.name}\n`);
-  const model = genAI.getGenerativeModel({ model: availableModel.name });
-  
   console.log("Fetching all blocks from page...");
   const allBlocks = await getAllBlocks(PAGE_ID);
   
@@ -159,13 +137,15 @@ const run = async () => {
   }
 
   for (const block of eligibleBlocks) {
-    await annotatePlace(block, model);
+    await annotatePlace(block);
     await delay(2000);
   }
 
   console.log("\n✓ Travel annotation complete");
 };
 
+// Run with API key test first
+await testAPIKey();
 run().catch(err => {
   console.error("Unexpected error:", err);
   process.exit(1);
