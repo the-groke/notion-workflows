@@ -1,4 +1,4 @@
-const { Client } = require("@notionhq/client");
+import { Client } from "@notionhq/client";
 
 // Read secrets from environment variables
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
@@ -7,8 +7,9 @@ const pageId = process.env.NOTION_PAGE_ID;
 async function deleteCheckedTodos(parentBlockId) {
   try {
     let cursor = undefined;
-    const blocksToCheck = [];
+    const allBlocks = [];
 
+    // First, get all blocks
     do {
       const response = await notion.blocks.children.list({
         block_id: parentBlockId,
@@ -16,50 +17,57 @@ async function deleteCheckedTodos(parentBlockId) {
         page_size: 100
       });
 
-      for (const block of response.results) {
-        // Track blocks that might need empty to-dos added
-        if (block.type === "heading_2" || block.type === "heading_3") {
-          blocksToCheck.push(block);
-        }
-
-        // Delete checked to-dos
-        if (block.type === "to_do" && block.to_do.checked) {
-          await notion.blocks.delete({ block_id: block.id });
-          const textContent = block.to_do.text?.map(t => t.plain_text).join(" ") || "<empty>";
-          console.log(`Deleted: ${textContent}`);
-        }
-
-        // Recursively process children
-        if (block.has_children) {
-          await deleteCheckedTodos(block.id);
-        }
-      }
-
+      allBlocks.push(...response.results);
       cursor = response.has_more ? response.next_cursor : undefined;
     } while (cursor);
 
-    // After processing all blocks, check headings for empty sections
-    for (const block of blocksToCheck) {
-      const children = await notion.blocks.children.list({
-        block_id: block.id,
-        page_size: 1
-      });
+    // Delete checked to-dos
+    for (const block of allBlocks) {
+      if (block.type === "to_do" && block.to_do.checked) {
+        await notion.blocks.delete({ block_id: block.id });
+        const textContent = block.to_do.text?.map(t => t.plain_text).join(" ") || "<empty>";
+        console.log(`Deleted: ${textContent}`);
+      }
 
-      if (children.results.length === 0) {
-        await notion.blocks.children.append({
-          block_id: block.id,
-          children: [
-            {
-              type: "to_do",
-              to_do: {
-                rich_text: [],
-                checked: false
+      // Recursively process nested blocks
+      if (block.has_children) {
+        await deleteCheckedTodos(block.id);
+      }
+    }
+
+    // Check each h2 heading to see if it's followed by any to-dos
+    for (let i = 0; i < allBlocks.length; i++) {
+      const block = allBlocks[i];
+      
+      if (block.type === "heading_2") {
+        // Check if this heading was deleted (if it was a to-do)
+        if (block.type === "to_do" && block.to_do?.checked) continue;
+        
+        // Look at the next block
+        const nextBlock = allBlocks[i + 1];
+        
+        // If next block is another heading or doesn't exist, this section is empty
+        const isNextBlockHeading = nextBlock && (nextBlock.type === "heading_1" || nextBlock.type === "heading_2" || nextBlock.type === "heading_3");
+        const hasNoNextBlock = !nextBlock;
+        
+        if (isNextBlockHeading || hasNoNextBlock) {
+          // Add an empty to-do after this heading
+          await notion.blocks.children.append({
+            block_id: parentBlockId,
+            children: [
+              {
+                type: "to_do",
+                to_do: {
+                  rich_text: [],
+                  checked: false
+                }
               }
-            }
-          ]
-        });
-        const blockText = block[block.type]?.rich_text?.map(t => t.plain_text).join(" ") || "section";
-        console.log(`Added empty to-do under: ${blockText}`);
+            ],
+            after: block.id
+          });
+          const blockText = block.heading_2?.rich_text?.map(t => t.plain_text).join(" ") || "section";
+          console.log(`Added empty to-do under: ${blockText}`);
+        }
       }
     }
   } catch (error) {
@@ -67,8 +75,6 @@ async function deleteCheckedTodos(parentBlockId) {
   }
 }
 
-(async () => {
-  console.log("Starting nightly shopping list cleanup...");
-  await deleteCheckedTodos(pageId);
-  console.log("Cleanup complete!");
-})();
+console.log("Starting nightly shopping list cleanup...");
+await deleteCheckedTodos(pageId);
+console.log("Cleanup complete!");
