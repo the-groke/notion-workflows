@@ -3,9 +3,6 @@
   "version": "1.0.0",
   "description": "Nightly cleanup for Notion shopping list",
   "main": "cleanup.js",
-  "scripts": {
-    "start": "node cleanup.js"
-  },
   "dependencies": {
     "@notionhq/client": "^5.0.0"
   }

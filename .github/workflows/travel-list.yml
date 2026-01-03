@@ -17,7 +17,7 @@ jobs:
 
       - run: npm install
 
-      - run: node annotate_travel_list.js
+      - run: node annotate-travel-list.js
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.TRAVEL_LIST_PAGE_ID }}
