@@ -26,12 +26,11 @@ async function getAllBlocks(blockId, allBlocks = []) {
   return allBlocks;
 }
 
-// Only annotate unchecked to-do blocks that have no children
+// Only annotate unchecked to-do blocks
 function isEligiblePlace(block) {
   return (
     block.type === "to_do" &&
     !block.to_do.checked &&
-    !block.has_children &&
     block.to_do.rich_text.length > 0
   );
 }
