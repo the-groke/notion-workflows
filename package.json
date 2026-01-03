@@ -4,6 +4,7 @@
   "description": "Nightly cleanup for Notion shopping list",
   "main": "cleanup.js",
   "dependencies": {
-    "@notionhq/client": "^5.0.0"
+    "@notionhq/client": "^5.0.0",
+    "openai": "^4.3.1"
   }
 }
