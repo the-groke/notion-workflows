@@ -5,11 +5,18 @@ const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PAGE_ID = process.env.NOTION_PAGE_ID;
 
+if (!PAGE_ID) {
+  console.error("ERROR: NOTION_PAGE_ID is not defined");
+  process.exit(1);
+}
+
+// Fetch top-level blocks
 async function getBlocks(blockId) {
   const res = await notion.blocks.children.list({ block_id: blockId });
   return res.results;
 }
 
+// Only annotate unchecked to-do blocks that have no children
 function isEligiblePlace(block) {
   return (
     block.type === "to_do" &&
@@ -23,6 +30,7 @@ function extractText(block) {
   return block.to_do.rich_text.map(t => t.plain_text).join("").trim();
 }
 
+// Annotate one place, with quota / rate-limit handling
 async function annotatePlace(block) {
   const place = extractText(block);
 
@@ -49,30 +57,43 @@ Rules:
 - Output markdown sub-bullets ONLY
 `;
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4.1-mini",
-    messages: [{ role: "user", content: prompt }],
-    temperature: 0.2
-  });
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",   // cheaper, safer quota
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.2
+    });
 
-  const lines = response.choices[0].message.content
-    .split("\n")
-    .filter(Boolean);
+    const lines = response.choices[0].message.content
+      .split("\n")
+      .filter(Boolean);
 
-  const children = lines.map(line => ({
-    object: "block",
-    type: "bulleted_list_item",
-    bulleted_list_item: {
-      rich_text: [{ type: "text", text: { content: line.replace(/^-\s*/, "") } }]
+    if (lines.length === 0) {
+      console.log(`Skipped ${place}: AI returned nothing`);
+      return;
     }
-  }));
 
-  await notion.blocks.children.append({
-    block_id: block.id,
-    children
-  });
+    const children = lines.map(line => ({
+      object: "block",
+      type: "bulleted_list_item",
+      bulleted_list_item: {
+        rich_text: [{ type: "text", text: { content: line.replace(/^-\s*/, "") } }]
+      }
+    }));
 
-  console.log(`Annotated: ${place}`);
+    await notion.blocks.children.append({
+      block_id: block.id,
+      children
+    });
+
+    console.log(`Annotated: ${place}`);
+  } catch (err) {
+    if (err.code === "insufficient_quota" || err.status === 429) {
+      console.warn(`Skipped AI annotation for "${place}": quota exceeded`);
+    } else {
+      console.error(`Error annotating "${place}":`, err);
+    }
+  }
 }
 
 async function run() {
@@ -87,7 +108,8 @@ async function run() {
   console.log("Travel annotation complete");
 }
 
+// Run and exit with error if something unexpected occurs
 run().catch(err => {
-  console.error(err);
+  console.error("Unexpected error:", err);
   process.exit(1);
 });
