@@ -1,4 +1,4 @@
-name: Nightly Cleanup
+name: Grocery Shopping List Cleanup
 
 on:
   schedule:

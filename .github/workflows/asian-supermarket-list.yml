@@ -1,4 +1,4 @@
-name: Nightly Cleanup
+name: Asian Supermarket List Cleanup
 
 on:
   schedule:

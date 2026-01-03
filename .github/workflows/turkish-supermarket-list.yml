@@ -1,4 +1,4 @@
-name: Nightly Cleanup
+name: Turkish Supermarket List Cleanup
 
 on:
   schedule:
