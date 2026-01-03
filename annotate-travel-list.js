@@ -3,7 +3,7 @@ import OpenAI from "openai";
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const PAGE_ID = process.env.NOTION_PAGE_ID;
+const PAGE_ID = process.env.TRAVEL_LIST_PAGE_ID
 
 async function getBlocks(blockId) {
   const res = await notion.blocks.children.list({ block_id: blockId });

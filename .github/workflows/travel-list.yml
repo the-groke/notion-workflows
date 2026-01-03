@@ -20,5 +20,5 @@ jobs:
       - run: node annotate_travel.js
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          NOTION_PAGE_ID: ${{ secrets.TRAVEL_PAGE_ID }}
+          NOTION_PAGE_ID: ${{ secrets.TRAVEL_LIST_PAGE_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
