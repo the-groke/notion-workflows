@@ -10,10 +10,20 @@ if (!PAGE_ID) {
   process.exit(1);
 }
 
-// Fetch top-level blocks
-async function getBlocks(blockId) {
+// Recursively fetch all blocks
+async function getAllBlocks(blockId, allBlocks = []) {
   const res = await notion.blocks.children.list({ block_id: blockId });
-  return res.results;
+  
+  for (const block of res.results) {
+    allBlocks.push(block);
+    
+    // If block has children, recursively fetch them
+    if (block.has_children) {
+      await getAllBlocks(block.id, allBlocks);
+    }
+  }
+  
+  return allBlocks;
 }
 
 // Only annotate unchecked to-do blocks that have no children
@@ -59,7 +69,7 @@ Rules:
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",   // cheaper, safer quota
+      model: "gpt-3.5-turbo",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.2
     });
@@ -86,29 +96,30 @@ Rules:
       children
     });
 
-    console.log(`Annotated: ${place}`);
+    console.log(`✓ Annotated: ${place}`);
   } catch (err) {
     if (err.code === "insufficient_quota" || err.status === 429) {
-      console.warn(`Skipped AI annotation for "${place}": quota exceeded`);
+      console.warn(`⚠ Skipped AI annotation for "${place}": quota exceeded`);
     } else {
-      console.error(`Error annotating "${place}":`, err);
+      console.error(`✗ Error annotating "${place}":`, err.message);
     }
   }
 }
 
 async function run() {
-  const blocks = await getBlocks(PAGE_ID);
+  console.log("Fetching all blocks from page...");
+  const allBlocks = await getAllBlocks(PAGE_ID);
+  
+  const eligibleBlocks = allBlocks.filter(isEligiblePlace);
+  console.log(`Found ${eligibleBlocks.length} unchecked to-do items\n`);
 
-  for (const block of blocks) {
-    if (isEligiblePlace(block)) {
-      await annotatePlace(block);
-    }
+  for (const block of eligibleBlocks) {
+    await annotatePlace(block);
   }
 
-  console.log("Travel annotation complete");
+  console.log("\n✓ Travel annotation complete");
 }
 
-// Run and exit with error if something unexpected occurs
 run().catch(err => {
   console.error("Unexpected error:", err);
   process.exit(1);
