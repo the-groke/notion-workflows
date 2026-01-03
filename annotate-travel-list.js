@@ -3,7 +3,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-pro" }); // Changed model name
 const PAGE_ID = process.env.NOTION_PAGE_ID;
 
 if (!PAGE_ID) {
