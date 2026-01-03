@@ -24,9 +24,30 @@ async function deleteCheckedTodos(parentBlockId) {
 
         if (block.has_children) {
           await deleteCheckedTodos(block.id);
+          
+          // Check if the block now has no children and add an empty to-do if needed
+          const childrenCheck = await notion.blocks.children.list({
+            block_id: block.id,
+            page_size: 1
+          });
+          
+          if (childrenCheck.results.length === 0) {
+            await notion.blocks.children.append({
+              block_id: block.id,
+              children: [
+                {
+                  type: "to_do",
+                  to_do: {
+                    rich_text: [],
+                    checked: false
+                  }
+                }
+              ]
+            });
+            console.log(`Added empty to-do under: ${block.type}`);
+          }
         }
       }
-
 
       cursor = response.has_more ? response.next_cursor : undefined;
     } while (cursor);
