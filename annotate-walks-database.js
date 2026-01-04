@@ -19,36 +19,88 @@ if (!HOME_LOCATION) {
 /* ----------------------------- Notion helpers ----------------------------- */
 
 const getAllPages = async () => {
-  // First, let's try to retrieve the database to see what we're working with
-  console.log("Attempting to retrieve database...");
+  console.log("Using DATABASE_ID:", DATABASE_ID);
   
-  const database = await notion.databases.retrieve({
-    database_id: DATABASE_ID,
-  });
+  // Try to retrieve as a database
+  try {
+    const database = await notion.databases.retrieve({
+      database_id: DATABASE_ID,
+    });
+    console.log("✓ Successfully retrieved as database");
+    console.log("Database title:", database.title?.[0]?.plain_text || "Untitled");
+  } catch (err) {
+    console.log("✗ Failed to retrieve as database:", err.message);
+    console.log("This might be a page ID, not a database ID");
+  }
   
-  console.log("Database found:", database.title?.[0]?.plain_text || "Untitled");
+  // Try to retrieve as a page
+  try {
+    const page = await notion.pages.retrieve({
+      page_id: DATABASE_ID,
+    });
+    console.log("✓ Successfully retrieved as page");
+    console.log("Page type:", page.object);
+    console.log("Page parent:", page.parent);
+  } catch (err) {
+    console.log("✗ Failed to retrieve as page:", err.message);
+  }
   
-  // Now search for all pages
+  // Try to get blocks from the page (if it's an inline database)
+  try {
+    const blocks = await notion.blocks.children.list({
+      block_id: DATABASE_ID,
+    });
+    console.log(`✓ Found ${blocks.results.length} blocks`);
+    
+    for (const block of blocks.results) {
+      console.log(`Block type: ${block.type}`);
+      if (block.type === "child_database") {
+        console.log("Found inline database with ID:", block.id);
+        
+        // Try to search this database
+        const allPages = await notion.search({
+          filter: {
+            property: "object",
+            value: "page"
+          }
+        });
+        
+        const databasePages = allPages.results.filter(page => 
+          page.parent?.database_id === block.id
+        );
+        
+        console.log(`Found ${databasePages.length} pages in inline database`);
+        
+        if (databasePages.length > 0) {
+          console.log("First page properties:", Object.keys(databasePages[0].properties));
+        }
+        
+        return databasePages;
+      }
+    }
+  } catch (err) {
+    console.log("✗ Failed to get blocks:", err.message);
+  }
+  
+  // If we get here, try the original search approach
   const allPages = await notion.search({
-    query: "",
     filter: {
       property: "object",
       value: "page"
     }
   });
   
-  console.log(`Total pages found in workspace: ${allPages.results.length}`);
+  console.log(`Total pages in search: ${allPages.results.length}`);
   
-  // Filter to pages in our database
-  const databasePages = allPages.results.filter(page => {
-    const isInDatabase = page.parent?.database_id === DATABASE_ID;
-    if (isInDatabase) {
-      console.log(`Found page in database: ${extractWalkName(page)}`);
-    }
-    return isInDatabase;
-  });
+  const databasePages = allPages.results.filter(page => 
+    page.parent?.database_id === DATABASE_ID
+  );
   
-  console.log(`Pages in this database: ${databasePages.length}`);
+  console.log(`Pages matching DATABASE_ID: ${databasePages.length}`);
+  
+  if (databasePages.length > 0) {
+    console.log("First page properties:", Object.keys(databasePages[0].properties));
+  }
   
   return databasePages;
 };
@@ -63,6 +115,12 @@ const isEmpty = (property) => {
 
 const isEligibleWalk = (page) => {
   const p = page.properties;
+  
+  console.log(`Checking eligibility for: ${extractWalkName(page)}`);
+  console.log("Properties:", Object.keys(p));
+  console.log("Distance from home empty?", isEmpty(p["Distance from home"]));
+  console.log("Transport options empty?", isEmpty(p["Transport options"]));
+  
   return (
     isEmpty(p["Distance from home"]) ||
     isEmpty(p["Transport options"]) ||
@@ -211,8 +269,10 @@ const run = async () => {
   console.log("Fetching all pages from database...");
   const pages = await getAllPages();
 
+  console.log(`\nTotal pages found: ${pages.length}`);
+
   const eligible = pages.filter(isEligibleWalk);
-  console.log(`Found ${eligible.length} walk items with empty fields\n`);
+  console.log(`\nFound ${eligible.length} walk items with empty fields\n`);
 
   if (!eligible.length) {
     console.log("No items need annotation. All done!");
