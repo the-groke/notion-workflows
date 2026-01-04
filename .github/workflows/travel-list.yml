@@ -2,7 +2,7 @@ name: Annotate Travel List
 
 on:
   schedule:
-    - cron: "0 3 * * *"   # nightly, different hour from cleanup
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 jobs:

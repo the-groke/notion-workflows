@@ -2,8 +2,8 @@ name: Asian Supermarket List Cleanup
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # Runs daily at 2 AM UTC
-  workflow_dispatch:      # Allows manual run
+    - cron: '0 0 * * *'
+  workflow_dispatch:
 
 jobs:
   cleanup:
