@@ -20,4 +20,4 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_PAGE_ID: ${{ secrets.ASIAN_SUPERMARKET_LIST_PAGE_ID }}
-        run: npm node cleanup.js
+        run: node cleanup.js
