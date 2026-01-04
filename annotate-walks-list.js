@@ -3,11 +3,11 @@ import { GoogleGenAI } from "@google/genai";
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const ai = new GoogleGenAI({});
-const PAGE_ID = process.env.WALKS_PAGE_ID;
+const PAGE_ID = process.env.NOTION_PAGE_ID;
 const HOME_LOCATION = "Farsley, Leeds";
 
 if (!PAGE_ID) {
-  console.error("ERROR: WALKS_PAGE_ID is not defined");
+  console.error("ERROR: NOTION_PAGE_ID is not defined");
   process.exit(1);
 }
 
