@@ -19,10 +19,21 @@ if (!HOME_LOCATION) {
 /* ----------------------------- Notion helpers ----------------------------- */
 
 const getAllPages = async () => {
-  const response = await notion.dataSources.query({
-    data_source_id: DATABASE_ID,
+  // Use search to filter pages by database
+  const response = await notion.search({
+    filter: {
+      property: "object",
+      value: "page"
+    }
   });
-  return response.results;
+  
+  // Filter to only pages in our database
+  const databasePages = response.results.filter(
+    page => page.parent?.type === "database_id" && 
+            page.parent?.database_id === DATABASE_ID
+  );
+  
+  return databasePages;
 };
 
 const isEmpty = (property) => {
