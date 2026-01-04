@@ -1,4 +1,4 @@
-name: Annotate Walks Database
+name: Populate Walks Database
 
 on:
   schedule:
@@ -17,7 +17,7 @@ jobs:
 
       - run: npm install
 
-      - run: node annotate-walks-database.js
+      - run: node populate-walks-database.js
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           WALKS_DATABASE_ID: ${{ secrets.WALKS_DATABASE_ID }}
