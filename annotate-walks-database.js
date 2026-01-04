@@ -98,7 +98,7 @@ const buildUpdates = (page, data) => {
   const props = page.properties;
 
   const fields = [
-    ["Distance from home", data.distance, v => ({ number: v })],
+    ["Distance from home (miles)", data.distance, v => ({ number: v })],
     ["Transport options", data.transport, v => ({ multi_select: parseMultiSelect(v) })],
     ["Type", data.type, v => ({ multi_select: parseMultiSelect(v) })],
     ["Parking", data.parking, v => ({ rich_text: [{ text: { content: v } }] })],
