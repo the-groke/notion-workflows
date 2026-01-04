@@ -11,8 +11,6 @@ if (!PAGE_ID) {
   process.exit(1);
 }
 
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
 const getAllBlocks = async (blockId, allBlocks = []) => {
   const res = await notion.blocks.children.list({ block_id: blockId });
   
@@ -41,10 +39,10 @@ const extractText = (block) => {
 
 const extractDistance = (text) => {
   const milesMatch = text.match(/(\d+(?:\.\d+)?)\s*miles?/i);
-  if (milesMatch) return parseFloat(milesMatch[1]);
+  if (milesMatch) return Number.parseFloat(milesMatch[1]);
   
   const kmMatch = text.match(/(\d+(?:\.\d+)?)\s*km/i);
-  if (kmMatch) return parseFloat(kmMatch[1]) * 0.621371;
+  if (kmMatch) return Number.parseFloat(kmMatch[1]) * 0.621371;
   
   return 999;
 };
@@ -99,8 +97,6 @@ Format your response as:
   });
 
   const text = response.text;
-  
-  // Split response by walk sections
   const sections = text.split(/###\s*Walk\s*\d+/i).filter(Boolean);
   
   const results = [];
@@ -112,7 +108,7 @@ Format your response as:
     
     if (!section) {
       console.log(`⚠ No data for: ${walk}`);
-      results.push({ block, distance: 999 });
+      results.push({ walk, distance: 999 });
       continue;
     }
     
@@ -123,7 +119,7 @@ Format your response as:
     
     if (lines.length === 0) {
       console.log(`⚠ No bullets for: ${walk}`);
-      results.push({ block, distance: 999 });
+      results.push({ walk, distance: 999 });
       continue;
     }
     
@@ -143,52 +139,10 @@ Format your response as:
     const distance = extractDistance(section);
     console.log(`✓ Annotated: ${walk} (${distance} miles)`);
     
-    results.push({ block, distance });
-    await delay(100); // Small delay between Notion writes
+    results.push({ walk, distance });
   }
   
   return results;
-};
-
-const reorderBlocks = async (blocksWithDistances) => {
-  const sorted = blocksWithDistances.sort((a, b) => a.distance - b.distance);
-  
-  console.log("\nReordering walks by distance...");
-  
-  for (const { block } of sorted) {
-    await notion.blocks.delete({ block_id: block.id });
-    await delay(100);
-  }
-  
-  for (const { block } of sorted) {
-    const children = await notion.blocks.children.list({ block_id: block.id });
-    
-    const newBlock = await notion.blocks.children.append({
-      block_id: PAGE_ID,
-      children: [{
-        type: "to_do",
-        to_do: {
-          rich_text: block.to_do.rich_text,
-          checked: block.to_do.checked,
-          color: block.to_do.color
-        }
-      }]
-    });
-    
-    if (children.results.length > 0) {
-      await notion.blocks.children.append({
-        block_id: newBlock.results[0].id,
-        children: children.results.map(child => ({
-          type: child.type,
-          [child.type]: child[child.type]
-        }))
-      });
-    }
-    
-    await delay(200);
-  }
-  
-  console.log("✓ Walks reordered by distance");
 };
 
 const run = async () => {
@@ -203,16 +157,19 @@ const run = async () => {
     return;
   }
 
-  const blocksWithDistances = await annotateAllWalks(eligibleBlocks);
+  const results = await annotateAllWalks(eligibleBlocks);
 
   console.log("\n✓ Walk annotation complete");
+  console.log("\nWalks sorted by distance:");
+  const sortedResults = [...results].sort((a, b) => a.distance - b.distance);
+  sortedResults.forEach(r => console.log(`  ${r.distance} miles - ${r.walk}`));
   
-  await reorderBlocks(blocksWithDistances);
-  
-  console.log("\n✓ All done!");
+  console.log("\n💡 Tip: Manually reorder your Notion list using the distances above");
 };
 
-run().catch(err => {
+try {
+  await run();
+} catch (err) {
   console.error("Unexpected error:", err);
   process.exit(1);
-});
+}
