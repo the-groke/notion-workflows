@@ -19,13 +19,25 @@ if (!HOME_LOCATION) {
 /* ----------------------------- Notion helpers ----------------------------- */
 
 const getAllPages = async () => {
-  // Use the databases.query method instead of request
-  const response = await notion.databases.query({
-    database_id: DATABASE_ID,
+  // Use fetch directly to call the Notion API
+  const response = await fetch(`https://api.notion.com/v1/databases/${DATABASE_ID}/query`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${process.env.NOTION_TOKEN}`,
+      "Notion-Version": "2022-06-28",
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({})
   });
   
-  console.log(`Found ${response.results.length} pages in database`);
-  return response.results;
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(`Failed to query database: ${error.message}`);
+  }
+  
+  const data = await response.json();
+  console.log(`Found ${data.results.length} pages in database`);
+  return data.results;
 };
 
 const isEmpty = (property) => {
