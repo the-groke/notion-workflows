@@ -19,19 +19,36 @@ if (!HOME_LOCATION) {
 /* ----------------------------- Notion helpers ----------------------------- */
 
 const getAllPages = async () => {
-  // Use search to filter pages by database
-  const response = await notion.search({
+  // First, let's try to retrieve the database to see what we're working with
+  console.log("Attempting to retrieve database...");
+  
+  const database = await notion.databases.retrieve({
+    database_id: DATABASE_ID,
+  });
+  
+  console.log("Database found:", database.title?.[0]?.plain_text || "Untitled");
+  
+  // Now search for all pages
+  const allPages = await notion.search({
+    query: "",
     filter: {
       property: "object",
       value: "page"
     }
   });
   
-  // Filter to only pages in our database
-  const databasePages = response.results.filter(
-    page => page.parent?.type === "database_id" && 
-            page.parent?.database_id === DATABASE_ID
-  );
+  console.log(`Total pages found in workspace: ${allPages.results.length}`);
+  
+  // Filter to pages in our database
+  const databasePages = allPages.results.filter(page => {
+    const isInDatabase = page.parent?.database_id === DATABASE_ID;
+    if (isInDatabase) {
+      console.log(`Found page in database: ${extractWalkName(page)}`);
+    }
+    return isInDatabase;
+  });
+  
+  console.log(`Pages in this database: ${databasePages.length}`);
   
   return databasePages;
 };
@@ -212,5 +229,6 @@ try {
   await run();
 } catch (err) {
   console.error("Unexpected error:", err);
+  console.error("Stack:", err.stack);
   process.exit(1);
 }
