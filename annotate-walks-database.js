@@ -19,11 +19,9 @@ if (!HOME_LOCATION) {
 /* ----------------------------- Notion helpers ----------------------------- */
 
 const getAllPages = async () => {
-  // Try using the request method directly to query the database
-  const response = await notion.request({
-    path: `databases/${DATABASE_ID}/query`,
-    method: "POST",
-    body: {}
+  // Use the databases.query method instead of request
+  const response = await notion.databases.query({
+    database_id: DATABASE_ID,
   });
   
   console.log(`Found ${response.results.length} pages in database`);
