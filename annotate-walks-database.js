@@ -52,7 +52,7 @@ const isEmpty = (property) => {
 const isEligibleWalk = (page) => {
   const p = page.properties;
   return (
-    isEmpty(p["Distance from home"]) ||
+    isEmpty(p["Distance from home (miles)"]) ||
     isEmpty(p["Transport options"]) ||
     isEmpty(p["Type"]) ||
     isEmpty(p["Parking"]) ||
