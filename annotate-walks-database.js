@@ -19,6 +19,10 @@ if (!HOME_LOCATION) {
 /* ----------------------------- Notion helpers ----------------------------- */
 
 const getAllPages = async () => {
+  console.log("DATABASE_ID:", DATABASE_ID);
+  console.log("notion object:", notion);
+  console.log("notion.databases:", notion.databases);
+  
   const response = await notion.databases.query({
     database_id: DATABASE_ID,
   });
@@ -201,5 +205,6 @@ try {
   await run();
 } catch (err) {
   console.error("Unexpected error:", err);
+  console.error("Error stack:", err.stack);
   process.exit(1);
-};
+}

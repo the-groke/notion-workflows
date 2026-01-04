@@ -1,4 +1,4 @@
-name: Annotate Walks List
+name: Annotate Walks Database
 
 on:
   schedule:
