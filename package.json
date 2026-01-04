@@ -4,7 +4,7 @@
   "description": "Nightly cleanup for Notion shopping list",
   "main": "cleanup.js",
   "dependencies": {
-    "@notionhq/client": "^5.0.0",
+    "@notionhq/client": "^5.6.0",
      "@google/genai": "^1.34.0"
   },
   "type": "module"
