@@ -19,90 +19,39 @@ if (!HOME_LOCATION) {
 /* ----------------------------- Notion helpers ----------------------------- */
 
 const getAllPages = async () => {
-  console.log("Using DATABASE_ID:", DATABASE_ID);
+  // In newer SDK versions, we need to paginate through database children
+  let allPages = [];
+  let cursor = undefined;
   
-  // Try to retrieve as a database
-  try {
-    const database = await notion.databases.retrieve({
-      database_id: DATABASE_ID,
-    });
-    console.log("✓ Successfully retrieved as database");
-    console.log("Database title:", database.title?.[0]?.plain_text || "Untitled");
-  } catch (err) {
-    console.log("✗ Failed to retrieve as database:", err.message);
-    console.log("This might be a page ID, not a database ID");
-  }
-  
-  // Try to retrieve as a page
-  try {
-    const page = await notion.pages.retrieve({
-      page_id: DATABASE_ID,
-    });
-    console.log("✓ Successfully retrieved as page");
-    console.log("Page type:", page.object);
-    console.log("Page parent:", page.parent);
-  } catch (err) {
-    console.log("✗ Failed to retrieve as page:", err.message);
-  }
-  
-  // Try to get blocks from the page (if it's an inline database)
-  try {
-    const blocks = await notion.blocks.children.list({
+  while (true) {
+    const response = await notion.blocks.children.list({
       block_id: DATABASE_ID,
+      start_cursor: cursor,
+      page_size: 100,
     });
-    console.log(`✓ Found ${blocks.results.length} blocks`);
     
-    for (const block of blocks.results) {
-      console.log(`Block type: ${block.type}`);
-      if (block.type === "child_database") {
-        console.log("Found inline database with ID:", block.id);
-        
-        // Try to search this database
-        const allPages = await notion.search({
-          filter: {
-            property: "object",
-            value: "page"
-          }
-        });
-        
-        const databasePages = allPages.results.filter(page => 
-          page.parent?.database_id === block.id
-        );
-        
-        console.log(`Found ${databasePages.length} pages in inline database`);
-        
-        if (databasePages.length > 0) {
-          console.log("First page properties:", Object.keys(databasePages[0].properties));
-        }
-        
-        return databasePages;
-      }
-    }
-  } catch (err) {
-    console.log("✗ Failed to get blocks:", err.message);
+    // Database entries are returned as blocks
+    allPages = allPages.concat(response.results);
+    
+    if (!response.has_more) break;
+    cursor = response.next_cursor;
   }
   
-  // If we get here, try the original search approach
-  const allPages = await notion.search({
-    filter: {
-      property: "object",
-      value: "page"
+  console.log(`Found ${allPages.length} items in database`);
+  
+  // Now fetch full page details for each
+  const fullPages = [];
+  for (const item of allPages) {
+    try {
+      const page = await notion.pages.retrieve({ page_id: item.id });
+      fullPages.push(page);
+      console.log(`Retrieved page: ${extractWalkName(page)}`);
+    } catch (err) {
+      console.log(`Skipped item ${item.id}: ${err.message}`);
     }
-  });
-  
-  console.log(`Total pages in search: ${allPages.results.length}`);
-  
-  const databasePages = allPages.results.filter(page => 
-    page.parent?.database_id === DATABASE_ID
-  );
-  
-  console.log(`Pages matching DATABASE_ID: ${databasePages.length}`);
-  
-  if (databasePages.length > 0) {
-    console.log("First page properties:", Object.keys(databasePages[0].properties));
   }
   
-  return databasePages;
+  return fullPages;
 };
 
 const isEmpty = (property) => {
@@ -115,12 +64,6 @@ const isEmpty = (property) => {
 
 const isEligibleWalk = (page) => {
   const p = page.properties;
-  
-  console.log(`Checking eligibility for: ${extractWalkName(page)}`);
-  console.log("Properties:", Object.keys(p));
-  console.log("Distance from home empty?", isEmpty(p["Distance from home"]));
-  console.log("Transport options empty?", isEmpty(p["Transport options"]));
-  
   return (
     isEmpty(p["Distance from home"]) ||
     isEmpty(p["Transport options"]) ||
@@ -247,7 +190,7 @@ const annotateAllWalks = async (pages) => {
   const walks = pages.map(extractWalkName);
   const prompt = buildPrompt(walks);
 
-  console.log("Annotating all walks in one API call...");
+  console.log("\nAnnotating all walks in one API call...");
 
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash",
@@ -269,10 +212,10 @@ const run = async () => {
   console.log("Fetching all pages from database...");
   const pages = await getAllPages();
 
-  console.log(`\nTotal pages found: ${pages.length}`);
+  console.log(`\nTotal pages retrieved: ${pages.length}`);
 
   const eligible = pages.filter(isEligibleWalk);
-  console.log(`\nFound ${eligible.length} walk items with empty fields\n`);
+  console.log(`Found ${eligible.length} walk items with empty fields\n`);
 
   if (!eligible.length) {
     console.log("No items need annotation. All done!");
