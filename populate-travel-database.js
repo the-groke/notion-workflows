@@ -3,10 +3,10 @@ import { GoogleGenAI } from "@google/genai";
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const ai = new GoogleGenAI({});
-const DATABASE_ID = process.env.TRAVEL_DATABASE_ID;
+const DATABASE_ID = process.env.PLACES_DATABASE_ID;
 
 if (!DATABASE_ID) {
-  console.error("ERROR: TRAVEL_DATABASE_ID is not defined");
+  console.error("ERROR: PLACES_DATABASE_ID is not defined");
   process.exit(1);
 }
 
@@ -166,9 +166,15 @@ const annotateAllPlaces = async (pages) => {
     contents: prompt,
   });
 
+  console.log("\n--- AI Response ---");
+  console.log(response.text);
+  console.log("--- End Response ---\n");
+
   const sections = response.text
     .split(/###\s*Place\s*\d+/i)
     .filter(Boolean);
+  
+  console.log(`Parsed ${sections.length} sections from response`);
 
   for (let i = 0; i < pages.length; i++) {
     await updatePlace(pages[i], sections[i], places[i]);
