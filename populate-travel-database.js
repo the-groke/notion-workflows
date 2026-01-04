@@ -3,10 +3,10 @@ import { GoogleGenAI } from "@google/genai";
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const ai = new GoogleGenAI({});
-const DATABASE_ID = process.env.PLACES_DATABASE_ID;
+const DATABASE_ID = process.env.TRAVEL_DATABASE_ID;
 
 if (!DATABASE_ID) {
-  console.error("ERROR: PLACES_DATABASE_ID is not defined");
+  console.error("ERROR: TRAVEL_DATABASE_ID is not defined");
   process.exit(1);
 }
 
