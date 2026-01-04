@@ -19,39 +19,15 @@ if (!HOME_LOCATION) {
 /* ----------------------------- Notion helpers ----------------------------- */
 
 const getAllPages = async () => {
-  // In newer SDK versions, we need to paginate through database children
-  let allPages = [];
-  let cursor = undefined;
+  // Try using the request method directly to query the database
+  const response = await notion.request({
+    path: `databases/${DATABASE_ID}/query`,
+    method: "POST",
+    body: {}
+  });
   
-  while (true) {
-    const response = await notion.blocks.children.list({
-      block_id: DATABASE_ID,
-      start_cursor: cursor,
-      page_size: 100,
-    });
-    
-    // Database entries are returned as blocks
-    allPages = allPages.concat(response.results);
-    
-    if (!response.has_more) break;
-    cursor = response.next_cursor;
-  }
-  
-  console.log(`Found ${allPages.length} items in database`);
-  
-  // Now fetch full page details for each
-  const fullPages = [];
-  for (const item of allPages) {
-    try {
-      const page = await notion.pages.retrieve({ page_id: item.id });
-      fullPages.push(page);
-      console.log(`Retrieved page: ${extractWalkName(page)}`);
-    } catch (err) {
-      console.log(`Skipped item ${item.id}: ${err.message}`);
-    }
-  }
-  
-  return fullPages;
+  console.log(`Found ${response.results.length} pages in database`);
+  return response.results;
 };
 
 const isEmpty = (property) => {
