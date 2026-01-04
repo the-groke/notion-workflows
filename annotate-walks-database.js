@@ -52,7 +52,6 @@ const isEmpty = (property) => {
 const isEligibleWalk = (page) => {
   const p = page.properties;
   return (
-    isEmpty(p["Location"]) ||
     isEmpty(p["Distance from home"]) ||
     isEmpty(p["Transport options"]) ||
     isEmpty(p["Type"]) ||
@@ -77,7 +76,6 @@ const extractNumber = (text, regex) =>
   text.match(regex) ? Number.parseFloat(RegExp.$1) : null;
 
 const parseSection = (section) => ({
-  location: extractText(section, /Location:\s*(.+?)(?=\n|$)/i),
   distance: extractNumber(section, /Distance:\s*(\d+(?:\.\d+)?)/i),
   transport: extractText(section, /Transport:\s*(.+?)(?=\n|$)/i),
   type: extractText(section, /Type:\s*(.+?)(?=\n|$)/i),
@@ -100,7 +98,6 @@ const buildUpdates = (page, data) => {
   const props = page.properties;
 
   const fields = [
-    ["Location", data.location, v => ({ place: v })],
     ["Distance from home", data.distance, v => ({ number: v })],
     ["Transport options", data.transport, v => ({ multi_select: parseMultiSelect(v) })],
     ["Type", data.type, v => ({ multi_select: parseMultiSelect(v) })],
@@ -124,7 +121,6 @@ const buildPrompt = (walks) => `
 You are annotating walking locations for someone who lives in ${HOME_LOCATION}.
 
 Rules:
-- Location: Give the location/area name (e.g., "Yorkshire Dales", "Lake District")
 - Distance: Give ONLY the number of miles from ${HOME_LOCATION}
 - Transport: Comma-separated list from: Train, Car, Bus
 - Type: Choose "Day trip" or "Overnight"
@@ -140,7 +136,6 @@ ${walks.map((w, i) => `${i + 1}. ${w}`).join("\n")}
 Format:
 
 ### Walk 1
-Location: Yorkshire Dales
 Distance: 45
 Transport: Train, Car
 Type: Day trip
