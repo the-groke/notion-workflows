@@ -3,18 +3,14 @@ import { GoogleGenAI } from "@google/genai";
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const ai = new GoogleGenAI({});
-const PAGE_ID = process.env.NOTION_PAGE_ID;
-const HOME_LOCATION = process.env.HOME_LOCATION;
+const PAGE_ID = process.env.WALKS_PAGE_ID;
+const HOME_LOCATION = "Farsley, Leeds";
 
 if (!PAGE_ID) {
   console.error("ERROR: WALKS_PAGE_ID is not defined");
   process.exit(1);
 }
 
-if (!HOME_LOCATION) {
-  console.error("ERROR: HOME_LOCATION is not defined");
-  process.exit(1);
-}
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const getAllBlocks = async (blockId, allBlocks = []) => {
@@ -45,24 +41,21 @@ const extractText = (block) => {
 
 const extractDistance = (text) => {
   const milesMatch = text.match(/(\d+(?:\.\d+)?)\s*miles?/i);
-  if (milesMatch) return Number.parseFloat(milesMatch[1]);
+  if (milesMatch) return parseFloat(milesMatch[1]);
   
   const kmMatch = text.match(/(\d+(?:\.\d+)?)\s*km/i);
-  if (kmMatch) return Number.parseFloat(kmMatch[1]) * 0.621371;
+  if (kmMatch) return parseFloat(kmMatch[1]) * 0.621371;
   
   return 999;
 };
 
-const annotateWalk = async (block) => {
-  const walk = extractText(block);
-
+const annotateAllWalks = async (blocks) => {
+  const walks = blocks.map(extractText);
+  
   const prompt = `
-You are annotating a walking location for someone who lives in ${HOME_LOCATION}.
+You are annotating walking locations for someone who lives in ${HOME_LOCATION}.
 
-Walk: "${walk}"
-
-Add EXACTLY six markdown sub-bullets in this order:
-
+For each walk below, provide EXACTLY six markdown sub-bullets in this order:
 - Distance from home:
 - Transport:
 - Day trip:
@@ -79,39 +72,82 @@ Rules:
 - Pubs: Mention any pubs on the walk route or nearby
 - Keep each bullet under 15 words
 - Be specific and factual
-- Output markdown sub-bullets ONLY
+
+Walks to annotate:
+${walks.map((walk, i) => `${i + 1}. ${walk}`).join('\n')}
+
+Format your response as:
+
+### Walk 1
+- Distance from home: ...
+- Transport: ...
+- Day trip: ...
+- Parking: ...
+- Walk length: ...
+- Pubs: ...
+
+### Walk 2
+- Distance from home: ...
+(etc)
 `;
 
+  console.log("Annotating all walks in one API call...");
+  
   const response = await ai.models.generateContent({
     model: "gemini-2.5-flash",
     contents: prompt,
   });
 
   const text = response.text;
-  const lines = text.split("\n").filter(Boolean);
-
-  if (lines.length === 0) {
-    console.log(`Skipped ${walk}: AI returned nothing`);
-    return { block, distance: 999 };
-  }
-
-  const children = lines.map(line => ({
-    object: "block",
-    type: "bulleted_list_item",
-    bulleted_list_item: {
-      rich_text: [{ type: "text", text: { content: line.replace(/^-\s*/, "") } }]
-    }
-  }));
-
-  await notion.blocks.children.append({
-    block_id: block.id,
-    children
-  });
-
-  const distance = extractDistance(text);
-  console.log(`✓ Annotated: ${walk} (${distance} miles)`);
   
-  return { block, distance };
+  // Split response by walk sections
+  const sections = text.split(/###\s*Walk\s*\d+/i).filter(Boolean);
+  
+  const results = [];
+  
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    const walk = walks[i];
+    const section = sections[i];
+    
+    if (!section) {
+      console.log(`⚠ No data for: ${walk}`);
+      results.push({ block, distance: 999 });
+      continue;
+    }
+    
+    const lines = section
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line.startsWith("-"));
+    
+    if (lines.length === 0) {
+      console.log(`⚠ No bullets for: ${walk}`);
+      results.push({ block, distance: 999 });
+      continue;
+    }
+    
+    const children = lines.map(line => ({
+      object: "block",
+      type: "bulleted_list_item",
+      bulleted_list_item: {
+        rich_text: [{ type: "text", text: { content: line.replace(/^-\s*/, "") } }]
+      }
+    }));
+    
+    await notion.blocks.children.append({
+      block_id: block.id,
+      children
+    });
+    
+    const distance = extractDistance(section);
+    console.log(`✓ Annotated: ${walk} (${distance} miles)`);
+    
+    results.push({ block, distance });
+    await delay(100); // Small delay between Notion writes
+  }
+  
+  return results;
 };
 
 const reorderBlocks = async (blocksWithDistances) => {
@@ -167,13 +203,7 @@ const run = async () => {
     return;
   }
 
-  const blocksWithDistances = [];
-  
-  for (const block of eligibleBlocks) {
-    const result = await annotateWalk(block);
-    blocksWithDistances.push(result);
-    await delay(2000);
-  }
+  const blocksWithDistances = await annotateAllWalks(eligibleBlocks);
 
   console.log("\n✓ Walk annotation complete");
   
@@ -182,9 +212,7 @@ const run = async () => {
   console.log("\n✓ All done!");
 };
 
-try {
-  await run();
-} catch (err) {
+run().catch(err => {
   console.error("Unexpected error:", err);
   process.exit(1);
-}
+});

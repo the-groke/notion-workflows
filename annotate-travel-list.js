@@ -10,35 +10,14 @@ if (!PAGE_ID) {
   process.exit(1);
 }
 
-// Test API key
-const testAPIKey = async () => {
-  try {
-    console.log("Testing Gemini API key...");
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: "Say hello",
-    });
-    console.log("✓ API key works! Response:", response.text);
-    console.log("");
-  } catch (err) {
-    console.error("✗ API key test failed:");
-    console.error("Error message:", err.message);
-    console.error("Full error:", err);
-    process.exit(1);
-  }
-};
-
-// Helper to add delay
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Recursively fetch all blocks
 const getAllBlocks = async (blockId, allBlocks = []) => {
   const res = await notion.blocks.children.list({ block_id: blockId });
   
   for (const block of res.results) {
     allBlocks.push(block);
     
-    // If block has children, recursively fetch them
     if (block.has_children) {
       await getAllBlocks(block.id, allBlocks);
     }
@@ -47,7 +26,6 @@ const getAllBlocks = async (blockId, allBlocks = []) => {
   return allBlocks;
 };
 
-// Only annotate unchecked to-do blocks that don't already have children
 const isEligiblePlace = (block) => {
   return (
     block.type === "to_do" &&
@@ -61,17 +39,13 @@ const extractText = (block) => {
   return block.to_do.rich_text.map(t => t.plain_text).join("").trim();
 };
 
-// Annotate one place
-const annotatePlace = async (block) => {
-  const place = extractText(block);
-
+const annotateAllPlaces = async (blocks) => {
+  const places = blocks.map(extractText);
+  
   const prompt = `
-You are annotating a personal travel list item.
+You are annotating personal travel list items.
 
-Place: "${place}"
-
-Add EXACTLY five markdown sub-bullets in this order:
-
+For each place below, provide EXACTLY five markdown sub-bullets in this order:
 - Best season:
 - Typical stay:
 - Known for:
@@ -83,28 +57,57 @@ Rules:
 - Each bullet under 12 words
 - Activities should be general
 - Flights from ONLY Leeds, Manchester, or London
-- If none exist say:
-  "No direct flights from Leeds, Manchester, or London"
-- Output markdown sub-bullets ONLY
+- If none exist say: "No direct flights from Leeds, Manchester, or London"
+
+Places to annotate:
+${places.map((place, i) => `${i + 1}. ${place}`).join('\n')}
+
+Format your response as:
+
+### Place 1
+- Best season: ...
+- Typical stay: ...
+- Known for: ...
+- Typical activities: ...
+- Flights from: ...
+
+### Place 2
+- Best season: ...
+(etc)
 `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-    });
+  console.log("Annotating all places in one API call...");
+  
+  const response = await ai.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: prompt,
+  });
 
-    const text = response.text;
+  const text = response.text;
+  
+  // Split response by place sections
+  const sections = text.split(/###\s*Place\s*\d+/i).filter(Boolean);
+  
+  for (let i = 0; i < blocks.length; i++) {
+    const block = blocks[i];
+    const place = places[i];
+    const section = sections[i];
     
-    const lines = text
-      .split("\n")
-      .filter(Boolean);
-
-    if (lines.length === 0) {
-      console.log(`Skipped ${place}: AI returned nothing`);
-      return;
+    if (!section) {
+      console.log(`⚠ No data for: ${place}`);
+      continue;
     }
-
+    
+    const lines = section
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line.startsWith("-"));
+    
+    if (lines.length === 0) {
+      console.log(`⚠ No bullets for: ${place}`);
+      continue;
+    }
+    
     const children = lines.map(line => ({
       object: "block",
       type: "bulleted_list_item",
@@ -112,15 +115,14 @@ Rules:
         rich_text: [{ type: "text", text: { content: line.replace(/^-\s*/, "") } }]
       }
     }));
-
+    
     await notion.blocks.children.append({
       block_id: block.id,
       children
     });
-
+    
     console.log(`✓ Annotated: ${place}`);
-  } catch (err) {
-    console.error(`✗ Error for "${place}":`, err.message);
+    await delay(100); // Small delay between Notion writes
   }
 };
 
@@ -136,17 +138,14 @@ const run = async () => {
     return;
   }
 
-  for (const block of eligibleBlocks) {
-    await annotatePlace(block);
-    await delay(2000);
-  }
+  await annotateAllPlaces(eligibleBlocks);
 
   console.log("\n✓ Travel annotation complete");
 };
 
-// Run with API key test first
-await testAPIKey();
-run().catch(err => {
+try {
+  await run();
+} catch (err) {
   console.error("Unexpected error:", err);
   process.exit(1);
-});
+}
