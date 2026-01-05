@@ -48,7 +48,8 @@ const isEligiblePlace = (page) => {
     isEmpty(p["Best season"]) ||
     isEmpty(p["Known for"]) ||
     isEmpty(p["Typical activities"]) ||
-    isEmpty(p["Flights from"])
+    isEmpty(p["Flights from"]) ||
+    isEmpty(p["Transport information"])
   );
 };
 
@@ -68,6 +69,7 @@ const parseSection = (section) => ({
   knownFor: extractText(section, /Known for:\s*(.+?)(?=\n|$)/i),
   activities: extractText(section, /Typical activities:\s*(.+?)(?=\n|$)/i),
   flights: extractText(section, /Flights from:\s*(.+?)(?=\n|$)/i),
+  transportInfo: extractText(section, /Transport information:\s*(.+?)(?=\n|$)/i),
 });
 
 const parseMultiSelect = (text) =>
@@ -88,6 +90,7 @@ const buildUpdates = (page, data) => {
     ["Known for", data.knownFor, v => ({ rich_text: [{ text: { content: v } }] })],
     ["Typical activities", data.activities, v => ({ multi_select: parseMultiSelect(v) })],
     ["Flights from", data.flights, v => ({ multi_select: parseMultiSelect(v) })],
+    ["Transport information", data.transportInfo, v => ({ rich_text: [{ text: { content: v } }] })],
   ];
 
   return fields.reduce((updates, [key, value, builder]) => {
@@ -109,6 +112,11 @@ Rules:
 - Known for: What the place is famous for or notable attractions
 - Typical activities: Comma-separated list of activities (e.g., Hiking, Kayaking, Skiing, Sightseeing, Beach, Culture, Food, Shopping)
 - Flights from: Comma-separated list from ONLY: London, Leeds, Manchester (only include if direct flights exist)
+- Transport information: Detailed flight info prioritizing Leeds > Manchester > London. Specify:
+  * If no direct flights from Leeds, mention this and give Manchester/London alternatives
+  * If flights are seasonal (e.g., Leeds to Iceland summer only), specify when available
+  * If no direct flights exist (e.g., Cappadocia), explain connection options like "Fly to Istanbul from Leeds/Manchester/London, then 1-hour flight or 10-hour bus to Cappadocia"
+  * Keep under 50 words
 - Keep concise and factual
 
 Places to annotate:
@@ -122,6 +130,7 @@ Best season: Summer
 Known for: Stunning fjords and northern lights
 Typical activities: Hiking, Kayaking, Sightseeing
 Flights from: London, Manchester
+Transport information: Direct flights from Manchester and London year-round. No direct flights from Leeds; connect via Manchester (1h 30m).
 
 ### Place 2
 Typical stay length: 1 week
@@ -129,6 +138,7 @@ Best season: Year-round
 Known for: Beautiful beaches and wine
 Typical activities: Beach, Food, Sightseeing
 Flights from: London
+Transport information: No direct flights from Leeds or Manchester. Fly from London Gatwick (2h 30m) or connect via Lisbon.
 
 (Continue for all places using ### Place N format)
 `;
