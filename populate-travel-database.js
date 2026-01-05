@@ -187,7 +187,7 @@ const annotateAllPlaces = async (pages) => {
   console.log("--- End Response ---\n");
 
   const sections = response.text
-    .split(/###\s*Place\s*\d+/i)
+    .split(/###\s*(?:Place\s*)?\d+\.?\s*/i)  // Matches both "### Place 1" and "### 1."
     .filter(Boolean);
   
   console.log(`Parsed ${sections.length} sections from response`);
