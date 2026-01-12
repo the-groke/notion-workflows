@@ -13,6 +13,7 @@
     "build": "echo \"Build step not configured (TypeScript only)\""
   },
   "devDependencies": {
+    "@types/node": "^25.0.6",
     "ts-node": "^10.9.1",
     "tsx": "^4.21.0",
     "typescript": "^5.1.6"
