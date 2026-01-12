@@ -17,7 +17,7 @@ jobs:
 
       - run: npm install
 
-      - run: node populate-travel-database.js
+      - run: npx tsx workflows/populate-travel-database/index.js
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           TRAVEL_DATABASE_ID: ${{ secrets.TRAVEL_DATABASE_ID }}
