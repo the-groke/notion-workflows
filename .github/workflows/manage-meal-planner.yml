@@ -1,0 +1,28 @@
+name: Manage Meal Planner
+
+on:
+  schedule:
+    # Run every night at 1am UTC
+    - cron: '30 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  manage-meal-planner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Manage meal planner
+        run: npx tsx workflows/manage-meal-planner/index.ts
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          MEAL_PLANNER_DATABASE_ID: ${{ secrets.MEAL_PLANNER_DATABASE_ID }}
