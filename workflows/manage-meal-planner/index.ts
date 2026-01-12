@@ -19,7 +19,7 @@ if (!DATABASE_ID) {
 
 const notion = createNotionClient(NOTION_TOKEN);
 
-// Format date as "Mon Jan 1"
+// Format date as "Mon 1 Jan"
 const formatDayName = (date: Date): string => {
   const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -28,7 +28,7 @@ const formatDayName = (date: Date): string => {
   const month = monthNames[date.getMonth()];
   const dateNum = date.getDate();
   
-  return `${day} ${month} ${dateNum}`;
+  return `${day} ${dateNum} ${month}`;
 };
 
 // Get date string in ISO format (YYYY-MM-DD)
