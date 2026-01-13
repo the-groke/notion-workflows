@@ -1,0 +1,28 @@
+name: Populate Meals Database
+
+on:
+  schedule:
+    # Run every night at 2am UTC
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  populate-meals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Populate meal recipes
+        run: npx tsx workflows/populate-meals/index.ts
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          MEALS_DATABASE_ID: ${{ secrets.MEALS_DATABASE_ID }}
