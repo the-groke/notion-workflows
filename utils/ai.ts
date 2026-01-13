@@ -31,6 +31,42 @@ export interface AIClient {
   models: AIModel;
 }
 
+type JsonPrimitive = string | number | boolean | null;
+type JsonObject = { [key: string]: JsonValue };
+type JsonArray = JsonValue[];
+type JsonValue = JsonPrimitive | JsonObject | JsonArray;
+
+const isJsonPrimitive = (value: JsonValue): value is JsonPrimitive => {
+  return (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  );
+};
+
+const isJsonObject = (value: JsonValue): value is JsonObject => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
+const isJsonArray = (value: JsonValue): value is JsonArray => {
+  return Array.isArray(value);
+};
+
+const isJsonValue = (value: unknown): value is JsonValue => {
+  if (value === null) return true;
+  if (typeof value === 'string') return true;
+  if (typeof value === 'number') return true;
+  if (typeof value === 'boolean') return true;
+  if (Array.isArray(value)) {
+    return value.every(isJsonValue);
+  }
+  if (typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>).every(isJsonValue);
+  }
+  return false;
+};
+
 export const createAIClient = async (): Promise<AIClient> => {
   const { GoogleGenAI: Client } = await import("@google/genai");
   return new Client({});
@@ -70,9 +106,25 @@ export const batchAnnotate = async <T>(
   }
 
   let parsedData: T[];
-  try {
-    const jsonResponse: unknown = JSON.parse(response.text ?? "");
-    parsedData = parseResponse(jsonResponse);
+ try {
+    // Strip markdown code fences if present
+        const rawText = response.text ?? "";
+        let cleanedText = rawText.trim();
+        if (!cleanedText) {
+          throw new Error("AI returned an empty response");
+        }
+        if (cleanedText.startsWith("```json")) {
+          cleanedText = cleanedText.replace(/^```json\s*/, "").replace(/\s*```$/, "");
+        } else if (cleanedText.startsWith("```")) {
+          cleanedText = cleanedText.replace(/^```\s*/, "").replace(/\s*```$/, "");
+        }
+        
+        const jsonResponse: unknown = JSON.parse(cleanedText);
+        
+        if (!isJsonValue(jsonResponse)) {
+          throw new Error("Response is not valid JSON");
+        }
+        parsedData = parseResponse(jsonResponse);
   } catch (error) {
     console.error("Failed to parse AI response as JSON:", error);
     console.error("Raw response:", response.text);
