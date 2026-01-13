@@ -7,6 +7,7 @@ import type {
   RichTextItemResponse,
   SelectPropertyItemObjectResponse,
 } from "@notionhq/client/build/src/api-endpoints";
+import type { PropertyBuilder } from "utils/parsing";
 
 type PageResponse = PageObjectResponse | PartialPageObjectResponse;
 type BlockResponse = BlockObjectResponse | PartialBlockObjectResponse;
@@ -17,13 +18,20 @@ interface DatabaseQueryResponse {
   next_cursor: string | null;
 }
 
-type NotionProperty =
+export type NotionPropertyResponse =
   | { type: "number"; number: number | null }
   | { type: "rich_text"; rich_text: RichTextItemResponse[] }
   | { type: "select"; select: SelectPropertyItemObjectResponse | null }
   | { type: "multi_select"; multi_select: SelectPropertyItemObjectResponse[] }
   | { type: "title"; title: RichTextItemResponse[] }
   | PageObjectResponse["properties"][string];
+
+export type NotionPropertyRequest =
+  | { type?: "number"; number: number | null }
+  | { type?: "rich_text"; rich_text: Array<{ text: { content: string; link?: { url: string } | null } }> }
+  | { type?: "select"; select: { name: string } | null }
+  | { type?: "multi_select"; multi_select: Array<{ name: string }> }
+  | { type?: "title"; title: Array<{ text: { content: string; link?: { url: string } | null } }> };
 
 export const createNotionClient = (token: string): Client => 
   new Client({ auth: token });
@@ -76,7 +84,7 @@ export const getAllBlocks = async (
   return allBlocks;
 };
 
-export const isEmpty = (property: NotionProperty | undefined): boolean => {
+export const isEmpty = (property: NotionPropertyResponse | undefined): boolean => {
   if (!property) return true;
   
   if (property.type === "number") {
@@ -117,40 +125,32 @@ export const hasEmptyProperties = (
   
   return propertyNames.some((name) => {
     const property = page.properties[name];
-    return isEmpty(property as NotionProperty);
+    return isEmpty(property as NotionPropertyResponse);
   });
 };
 
-type PropertyValue = 
-  | { rich_text: Array<{ text: { content: string } }> }
-  | { select: { name: string } }
-  | { multi_select: Array<{ name: string }> }
-  | { number: number };
-
-type PropertyBuilder = (value: string | number) => PropertyValue;
-
-export const buildPropertyUpdates = <T extends Record<string, string | number>>(
+export const buildPropertyUpdates = <T extends { [K in keyof T]: string | number }>(
   page: PageResponse,
   data: T,
   fieldMappings: Array<[string, keyof T, PropertyBuilder]>
-): Record<string, PropertyValue> => {
+): Record<string, NotionPropertyRequest> => {
   if (!("properties" in page)) return {};
   
   return fieldMappings.reduce((updates, [propertyName, dataKey, builder]) => {
     const value = data[dataKey];
     const property = page.properties[propertyName];
     
-    if (isEmpty(property as NotionProperty) && value !== null && value !== undefined) {
+    if (isEmpty(property as NotionPropertyResponse) && value !== null && value !== undefined) {
       updates[propertyName] = builder(value);
     }
     return updates;
-  }, {} as Record<string, PropertyValue>);
+  }, {} as Record<string, NotionPropertyRequest>);
 };
 
 export const updatePage = async (
   notion: Client,
   pageId: string,
-  properties: Record<string, PropertyValue>
+  properties: Record<string, NotionPropertyRequest>
 ): Promise<void> => {
   await notion.pages.update({
     page_id: pageId,

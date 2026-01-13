@@ -1,4 +1,6 @@
+// Utils
 import { createNotionClient, getAllBlocks } from 'utils/notion';
+// Types
 import type {
   BlockObjectResponse,
   PartialBlockObjectResponse,

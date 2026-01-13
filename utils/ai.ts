@@ -1,24 +1,20 @@
-import type { GoogleGenAI } from "@google/genai";
 import type { PageObjectResponse, PartialPageObjectResponse } from "@notionhq/client/build/src/api-endpoints";
+import { NotionPropertyRequest } from './notion';
 
 type PageResponse = PageObjectResponse | PartialPageObjectResponse;
-
-interface PropertyValue {
-  [key: string]: unknown;
-}
 
 interface BatchAnnotateConfig<T> {
   pages: PageResponse[];
   extractName: (page: PageResponse) => string;
   buildPrompt: (names: string[]) => Promise<string>;
   parseResponse: (response: unknown) => T[];
-  buildUpdates: (page: PageResponse, data: T) => Record<string, PropertyValue>;
-  updatePage: (page: PageResponse, updates: Record<string, PropertyValue>) => Promise<void>;
+  buildUpdates: (page: PageResponse, data: T) => Record<string, NotionPropertyRequest>;
+  updatePage: (page: PageResponse, updates: Record<string, NotionPropertyRequest>) => Promise<void>;
   itemType?: string;
 }
 
 interface AIResponse {
-  text: string;
+  text?: string;
 }
 
 interface AIModel {
@@ -31,11 +27,11 @@ interface AIModel {
   }) => Promise<AIResponse>;
 }
 
-interface AIClient {
+export interface AIClient {
   models: AIModel;
 }
 
-export const createAIClient = async (): Promise<GoogleGenAI> => {
+export const createAIClient = async (): Promise<AIClient> => {
   const { GoogleGenAI: Client } = await import("@google/genai");
   return new Client({});
 };
@@ -69,13 +65,13 @@ export const batchAnnotate = async <T>(
 
   if (process.env.DEBUG) {
     console.log("\n--- AI Response ---");
-    console.log(response.text);
+    console.log(response.text ?? "");
     console.log("--- End Response ---\n");
   }
 
   let parsedData: T[];
   try {
-    const jsonResponse: unknown = JSON.parse(response.text);
+    const jsonResponse: unknown = JSON.parse(response.text ?? "");
     parsedData = parseResponse(jsonResponse);
   } catch (error) {
     console.error("Failed to parse AI response as JSON:", error);
