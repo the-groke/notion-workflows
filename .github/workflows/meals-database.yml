@@ -26,3 +26,4 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           MEALS_DATABASE_ID: ${{ secrets.MEALS_DATABASE_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
