@@ -1,8 +1,8 @@
-
-import { createNotionClient, getAllPages } from 'utils/notion.js';
-import { MEAL_PLANNER_WINDOW_DAYS, type MealPlanDay } from "./config.js";
+import 'dotenv/config';
+import { createNotionClient, getAllPages } from 'utils/notion';
+import { MEAL_PLANNER_WINDOW_DAYS, type MealPlanDay } from "./config";
 import type { PageObjectResponse } from "@notionhq/client/build/src/api-endpoints";
-import { logger } from 'utils/logger.js';
+import { logger } from 'utils/logger';
 
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
 const DATABASE_ID = process.env.MEAL_PLANNER_DATABASE_ID;
@@ -40,7 +40,7 @@ const toISODate = (date: Date): string => {
 const parseExistingPages = (pages: PageObjectResponse[]): MealPlanDay[] => {
   return pages
     .map((page) => {
-      const nameProperty = page.properties.Name;
+      const nameProperty = page.properties.Day;
       const dateProperty = page.properties.Date;
 
       if (nameProperty?.type !== "title" || dateProperty?.type !== "date") {
@@ -109,7 +109,7 @@ const createMissingPages = async (
       await notion.pages.create({
         parent: { database_id: DATABASE_ID },
         properties: {
-          Name: {
+          Day: {
             title: [
               {
                 text: {
@@ -146,7 +146,7 @@ const updatePageNames = async (existingDays: MealPlanDay[]): Promise<number> => 
       await notion.pages.update({
         page_id: day.id,
         properties: {
-          Name: {
+          Day: {
             title: [
               {
                 text: {
