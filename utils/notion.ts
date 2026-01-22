@@ -40,6 +40,9 @@ export const getAllPages = async (
   databaseId: string,
   token: string
 ): Promise<PageResponse[]> => {
+  console.log("Using token:", token.substring(0, 10) + "...");
+  console.log("Database ID:", databaseId);
+
   const response = await fetch(
     `https://api.notion.com/v1/databases/${databaseId}/query`,
     {
@@ -53,14 +56,17 @@ export const getAllPages = async (
     }
   );
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(`Failed to query database: ${error.message}`);
-  }
+if (!response.ok) {
+  const error = await response.json();
+  console.log("Full error response:", JSON.stringify(error, null, 2));
+  throw new Error(`Failed to query database: ${error.message}`);
+}
 
   const data = await response.json() as DatabaseQueryResponse;
   console.log(`Found ${data.results.length} pages in database`);
   return data.results;
+
+  
 };
 
 export const getAllBlocks = async (
