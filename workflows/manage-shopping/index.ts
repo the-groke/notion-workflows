@@ -1,11 +1,13 @@
 import 'dotenv/config';
+// Utils
 import {
   createNotionClient,
   getAllPages,
   getAllBlocks,
 } from "utils/notion";
-import { createAIClient, type AIClient } from "utils/ai";
 import { logger } from "utils/logger";
+import { createAIClient, type AIClient } from "utils/ai";
+// Types
 import type { 
   PageObjectResponse,
   BlockObjectResponse,
