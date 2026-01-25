@@ -1,0 +1,31 @@
+name: Manage Shopping
+
+on:
+  schedule:
+    # Run every night at 11pm UTC
+    - cron: '0 23 * * *'
+  workflow_dispatch:
+
+jobs:
+  manage-shopping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Update shopping helper
+        run: npx tsx workflows/manage-shopping/index.ts
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          MEALS_DATABASE_ID: ${{ secrets.MEALS_DATABASE_ID }}
+          SHOPPING_HELPER_DATABASE_ID: ${{ secrets.SHOPPING_HELPER_DATABASE_ID }}
+          NOTION_PAGE_ID: ${{ secrets.GROCERY_SHOPPING_LIST_PAGE_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
