@@ -1,13 +1,11 @@
 import 'dotenv/config';
-// Utils
 import {
   createNotionClient,
   getAllPages,
   getAllBlocks,
 } from "utils/notion";
-import { logger } from "utils/logger";
 import { createAIClient, type AIClient } from "utils/ai";
-// Types
+import { logger } from "utils/logger";
 import type { 
   PageObjectResponse,
   BlockObjectResponse,
@@ -267,6 +265,14 @@ const populateHelperDatabase = async (
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
+  // Create a map of all current ingredients from upcoming meals
+  const upcomingIngredients = new Set<string>();
+  for (const meal of meals) {
+    for (const ingredient of meal.ingredients) {
+      upcomingIngredients.add(ingredient.toLowerCase());
+    }
+  }
+
   // Delete items that meet any of these criteria:
   // 1. Related to meals no longer in the next 7 days
   // 2. Older than 7 days AND not checked for any shopping list
@@ -292,6 +298,21 @@ const populateHelperDatabase = async (
                 isOlderThan7Days ? "older than 7 days" : 
                 "meal no longer upcoming"
       });
+    }
+  }
+
+  // Resurrect items: Uncheck "Delete" for items that appear in new upcoming meals
+  for (const item of existingItems) {
+    if (item.delete && upcomingIngredients.has(item.item.toLowerCase())) {
+      await notion.pages.update({
+        page_id: item.id,
+        properties: {
+          Delete: {
+            checkbox: false,
+          },
+        },
+      });
+      logger.info("Resurrected item (unchecked Delete)", { item: item.item });
     }
   }
 
