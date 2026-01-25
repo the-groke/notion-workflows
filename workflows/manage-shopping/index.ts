@@ -262,18 +262,12 @@ const populateHelperDatabase = async (
   meals: Meal[],
   existingItems: HelperItem[]
 ): Promise<void> => {
-  const existingItemNames = new Set(existingItems.map((i) => i.item.toLowerCase()));
+  const existingItemsMap = new Map(
+    existingItems.map((i) => [i.item.toLowerCase(), i])
+  );
   const currentMealIds = new Set(meals.map((m) => m.id));
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-  // Create a map of all current ingredients from upcoming meals
-  const upcomingIngredients = new Set<string>();
-  for (const meal of meals) {
-    for (const ingredient of meal.ingredients) {
-      upcomingIngredients.add(ingredient.toLowerCase());
-    }
-  }
 
   // Delete items that meet any of these criteria:
   // 1. Related to meals no longer in the next 7 days
@@ -303,64 +297,75 @@ const populateHelperDatabase = async (
     }
   }
 
-  // Resurrect items: Uncheck "Delete" for items that appear in new upcoming meals
-  for (const item of existingItems) {
-    if (item.delete && upcomingIngredients.has(item.item.toLowerCase())) {
-      await notion.pages.update({
-        page_id: item.id,
-        properties: {
-          Delete: {
-            checkbox: false,
-          },
-        },
-      });
-      logger.info("Resurrected item (unchecked Delete)", { item: item.item });
-    }
-  }
-
-  // Deduplicate ingredients before adding
-  const ingredientsToAdd = new Map<string, { meal: Meal; ingredient: string }>();
+  // Process ingredients from meals - add new ones and resurrect deleted ones if needed
+  const processedIngredients = new Set<string>();
   
   for (const meal of meals) {
     for (const ingredient of meal.ingredients) {
       const normalizedIngredient = ingredient.toLowerCase();
-      if (!existingItemNames.has(normalizedIngredient) && !ingredientsToAdd.has(normalizedIngredient)) {
-        ingredientsToAdd.set(normalizedIngredient, { meal, ingredient });
+      
+      // Skip if we've already processed this ingredient
+      if (processedIngredients.has(normalizedIngredient)) {
+        continue;
+      }
+      
+      processedIngredients.add(normalizedIngredient);
+      
+      const existingItem = existingItemsMap.get(normalizedIngredient);
+      
+      if (existingItem) {
+        // Item exists - check if it's marked for deletion and needs resurrection
+        if (existingItem.delete) {
+          // Only resurrect if this ingredient is from a NEW meal (not already linked)
+          const itemLinkedToThisMeal = existingItem.mealId === meal.id;
+          
+          if (!itemLinkedToThisMeal) {
+            // This ingredient appears in a new meal, resurrect it
+            await notion.pages.update({
+              page_id: existingItem.id,
+              properties: {
+                Delete: {
+                  checkbox: false,
+                },
+                Meal: {
+                  relation: [{ id: meal.id }],
+                },
+              },
+            });
+            logger.info("Resurrected item (appears in new meal)", { 
+              item: existingItem.item,
+              newMeal: meal.name 
+            });
+          }
+        }
+      } else {
+        // Item doesn't exist - create it
+        await notion.pages.create({
+          parent: { database_id: SHOPPING_HELPER_DATABASE_ID },
+          properties: {
+            Item: {
+              title: [{ text: { content: ingredient } }],
+            },
+            "Add to shopping list": {
+              checkbox: false,
+            },
+            "Add to Turkish supermarket shopping list": {
+              checkbox: false,
+            },
+            "Add to Asian supermarket shopping list": {
+              checkbox: false,
+            },
+            Delete: {
+              checkbox: false,
+            },
+            Meal: {
+              relation: [{ id: meal.id }],
+            },
+          },
+        });
+        logger.info("Added ingredient to helper", { ingredient, meal: meal.name });
       }
     }
-  }
-
-  // Add new ingredients
-  for (const [_, { meal, ingredient }] of ingredientsToAdd) {
-    await notion.pages.create({
-      parent: { database_id: SHOPPING_HELPER_DATABASE_ID },
-      properties: {
-        Item: {
-          title: [{ text: { content: ingredient } }],
-        },
-        "Add to shopping list": {
-          checkbox: false,
-        },
-        "Add to Turkish supermarket shopping list": {
-          checkbox: false,
-        },
-        "Add to Asian supermarket shopping list": {
-          checkbox: false,
-        },
-        Delete: {
-          checkbox: false,
-        },
-        Meal: {
-          relation: [{ id: meal.id }],
-        },
-      },
-    });
-    existingItemNames.add(ingredient.toLowerCase());
-    logger.info("Added ingredient to helper", { ingredient, meal: meal.name });
-  }
-
-  if (ingredientsToAdd.size > 0) {
-    logger.success("Added new ingredients", { count: ingredientsToAdd.size });
   }
 };
 
