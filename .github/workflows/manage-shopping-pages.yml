@@ -26,6 +26,7 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           MEALS_DATABASE_ID: ${{ secrets.MEALS_DATABASE_ID }}
+          MEAL_PLANNER_DATABASE_ID: ${{ secrets.MEAL_PLANNER_DATABASE_ID }}
           SHOPPING_HELPER_DATABASE_ID: ${{ secrets.SHOPPING_HELPER_DATABASE_ID }}
           NOTION_PAGE_ID: ${{ secrets.GROCERY_SHOPPING_LIST_PAGE_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
