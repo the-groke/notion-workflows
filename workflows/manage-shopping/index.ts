@@ -1,13 +1,11 @@
 import 'dotenv/config';
-// Utils
 import {
   createNotionClient,
   getAllPages,
   getAllBlocks,
 } from "utils/notion";
-import { logger } from "utils/logger";
 import { createAIClient, type AIClient } from "utils/ai";
-// Types
+import { logger } from "utils/logger";
 import type { 
   PageObjectResponse,
   BlockObjectResponse,
@@ -262,12 +260,12 @@ const populateHelperDatabase = async (
   meals: Meal[],
   existingItems: HelperItem[]
 ): Promise<void> => {
-  const existingItemsMap = new Map(
-    existingItems.map((i) => [i.item.toLowerCase(), i])
-  );
   const currentMealIds = new Set(meals.map((m) => m.id));
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  // Track which items we've archived
+  const archivedItemIds = new Set<string>();
 
   // Delete items that meet any of these criteria:
   // 1. Related to meals no longer in the next 7 days
@@ -288,6 +286,7 @@ const populateHelperDatabase = async (
         page_id: item.id,
         archived: true,
       });
+      archivedItemIds.add(item.id);
       logger.info("Removed item", { 
         item: item.item,
         reason: item.delete ? "marked for deletion (>7 days)" : 
@@ -296,6 +295,13 @@ const populateHelperDatabase = async (
       });
     }
   }
+
+  // Create a map of existing items (excluding archived ones)
+  const existingItemsMap = new Map(
+    existingItems
+      .filter(item => !archivedItemIds.has(item.id))
+      .map((i) => [i.item.toLowerCase(), i])
+  );
 
   // Process ingredients from meals - add new ones and resurrect deleted ones if needed
   const processedIngredients = new Set<string>();
