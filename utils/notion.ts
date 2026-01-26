@@ -1,7 +1,6 @@
 import { Client } from "@notionhq/client";
 import type {
   PageObjectResponse,
-  PartialPageObjectResponse,
   BlockObjectResponse,
   PartialBlockObjectResponse,
   RichTextItemResponse,
@@ -9,7 +8,7 @@ import type {
 } from "@notionhq/client/build/src/api-endpoints";
 import type { PropertyBuilder } from "utils/parsing";
 
-type PageResponse = PageObjectResponse | PartialPageObjectResponse;
+type PageResponse = PageObjectResponse;
 type BlockResponse = BlockObjectResponse | PartialBlockObjectResponse;
 
 interface DatabaseQueryResponse {

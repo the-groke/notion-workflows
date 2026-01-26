@@ -1,7 +1,7 @@
-import type { PageObjectResponse, PartialPageObjectResponse } from "@notionhq/client/build/src/api-endpoints";
+import type { PageObjectResponse } from "@notionhq/client/build/src/api-endpoints";
 import { NotionPropertyRequest } from './notion';
 
-type PageResponse = PageObjectResponse | PartialPageObjectResponse;
+type PageResponse = PageObjectResponse;
 
 interface BatchAnnotateConfig<T> {
   pages: PageResponse[];

@@ -53,6 +53,14 @@ Example output: "Double cream, Boneless chicken thighs, Canned diced tomatoes, G
 
 {{MEALS_LIST}}
 
+**IMPORTANT**: If a meal already has ingredients listed under "Existing ingredients", you MUST:
+1. Use those EXACT ingredients in your cooking instructions
+2. DO NOT add ingredients that aren't in the existing list
+3. Write instructions that only use what's provided
+4. If the ingredients or title suggest a variation (e.g., only vegetables for "Faux fry-up"), adapt the recipe accordingly
+
+If no existing ingredients are listed, provide a complete ingredient list and instructions as normal.
+
 ## Output Format
 
 **IMPORTANT**: You MUST respond with ONLY valid JSON in this exact format (no markdown, no explanation). Do not wrap the JSON in ````` ``` `````:
