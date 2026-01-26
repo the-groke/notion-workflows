@@ -5,14 +5,14 @@ import type { PageObjectResponse } from "@notionhq/client/build/src/api-endpoint
 import { logger } from 'utils/logger';
 
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
-const DATABASE_ID = process.env.MEAL_PLANNER_DATABASE_ID;
+const MEAL_PLANNER_DATABASE_ID = process.env.MEAL_PLANNER_DATABASE_ID;
 
 if (!NOTION_TOKEN) {
   logger.error("NOTION_TOKEN is not defined");
   process.exit(1);
 }
 
-if (!DATABASE_ID) {
+if (!MEAL_PLANNER_DATABASE_ID) {
   logger.error("MEAL_PLANNER_DATABASE_ID is not defined");
   process.exit(1);
 }
@@ -107,7 +107,7 @@ const createMissingPages = async (
     
     if (!existingDateSet.has(isoDate)) {
       await notion.pages.create({
-        parent: { database_id: DATABASE_ID },
+        parent: { database_id: MEAL_PLANNER_DATABASE_ID },
         properties: {
           Day: {
             title: [
@@ -172,7 +172,7 @@ const updatePageNames = async (existingDays: MealPlanDay[]): Promise<number> => 
 
 const run = async () => {
   logger.info("Fetching meal plan pages from database...");
-  const pages = await getAllPages(DATABASE_ID, NOTION_TOKEN);
+  const pages = await getAllPages(MEAL_PLANNER_DATABASE_ID, NOTION_TOKEN);
 
   const existingDays = parseExistingPages(
     pages.filter((p): p is PageObjectResponse => "properties" in p)
