@@ -1,0 +1,30 @@
+name: Populate Films and TV Database
+
+on:
+  schedule:
+    # Run every night at 3:30 UTC
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  populate-films-and-tv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Populate films and TV shows
+        run: npx tsx workflows/populate-films-and-tv/index.ts
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          FILMS_DATABASE_ID: ${{ secrets.FILMS_DATABASE_ID }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
