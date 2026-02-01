@@ -1,0 +1,23 @@
+name: To-Do List Cleanup
+
+on:
+  schedule:
+    - cron: '15 4 * * *'
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: npm install
+      - name: Run cleanup script
+        env:
+          NOTION_TOKEN: ${{ secrets.PRIVATE_INTEGRATION_TOKEN }}
+          NOTION_PAGE_ID: ${{ secrets.TO_DO_LIST_PAGE_ID }}
+        run: npx tsx workflows/cleanup-shopping/index.ts
