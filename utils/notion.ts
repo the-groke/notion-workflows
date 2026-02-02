@@ -6,6 +6,9 @@ import type {
   RichTextItemResponse,
   SelectPropertyItemObjectResponse,
 } from "@notionhq/client/build/src/api-endpoints";
+// Utils
+import { logger } from 'utils/logger';
+// Types
 import type { PropertyBuilder } from "utils/parsing";
 
 type PageResponse = PageObjectResponse;
@@ -39,33 +42,45 @@ export const getAllPages = async (
   databaseId: string,
   token: string
 ): Promise<PageResponse[]> => {
-  console.log("Using token:", token.substring(0, 10) + "...");
-  console.log("Database ID:", databaseId);
+  logger.info("Using token");
 
-  const response = await fetch(
-    `https://api.notion.com/v1/databases/${databaseId}/query`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Notion-Version": "2022-06-28",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({}),
+  const allPages: PageResponse[] = [];
+  let hasMore = true;
+  let startCursor: string | undefined = undefined;
+
+  while (hasMore) {
+    const response = await fetch(
+      `https://api.notion.com/v1/databases/${databaseId}/query`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Notion-Version": "2022-06-28",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          start_cursor: startCursor,
+          page_size: 100,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`Failed to query database: ${error.message}`);
     }
-  );
 
-if (!response.ok) {
-  const error = await response.json();
-  console.log("Full error response:", JSON.stringify(error, null, 2));
-  throw new Error(`Failed to query database: ${error.message}`);
-}
+    const data = await response.json() as DatabaseQueryResponse;
+    allPages.push(...data.results);
+    
+    hasMore = data.has_more;
+    startCursor = data.next_cursor || undefined;
+    
+    logger.info(`Fetched ${data.results.length} pages (total so far: ${allPages.length})`);
+  }
 
-  const data = await response.json() as DatabaseQueryResponse;
-  console.log(`Found ${data.results.length} pages in database`);
-  return data.results;
-
-  
+  logger.info(`Found ${allPages.length} pages in database`);
+  return allPages;
 };
 
 export const getAllBlocks = async (
