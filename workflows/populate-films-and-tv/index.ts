@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { createNotionClient, getAllPages, extractTitle } from "utils/notion";
 import { logger } from "utils/logger";
+import type { UpdatePageParameters } from "@notionhq/client/build/src/api-endpoints";
 
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
 const DATABASE_ID = process.env.FILMS_DATABASE_ID;
@@ -27,12 +28,105 @@ if (!OMDB_API_KEY) {
 
 const notion = createNotionClient(NOTION_TOKEN);
 
-const extractYearFromTitle = (title: string): number | undefined => {
-  const regex = /\((\d{4})\)/;
-  const match = regex.exec(title);
-  return match ? Number.parseInt(match[1]) : undefined;
-};
+// Type definitions for OMDB API
+interface OMDBRating {
+  Source: string;
+  Value: string;
+}
 
+interface OMDBResponse {
+  Response: string;
+  imdbRating?: string;
+  Metascore?: string;
+  Ratings?: OMDBRating[];
+}
+
+// Type definitions for TMDB API
+interface TMDBGenre {
+  id: number;
+  name: string;
+}
+
+interface TMDBCrewMember {
+  id: number;
+  name: string;
+  job: string;
+}
+
+interface TMDBCreator {
+  id: number;
+  name: string;
+}
+
+interface TMDBProductionCountry {
+  iso_3166_1: string;
+  name: string;
+}
+
+interface TMDBCredits {
+  crew?: TMDBCrewMember[];
+}
+
+interface TMDBExternalIds {
+  imdb_id?: string;
+}
+
+interface TMDBMovieDetails {
+  id: number;
+  title?: string;
+  overview?: string;
+  poster_path?: string;
+  release_date?: string;
+  runtime?: number;
+  genres?: TMDBGenre[];
+  production_countries?: TMDBProductionCountry[];
+  imdb_id?: string;
+  external_ids?: TMDBExternalIds;
+  credits?: TMDBCredits;
+}
+
+interface TMDBTVDetails {
+  id: number;
+  name?: string;
+  overview?: string;
+  poster_path?: string;
+  first_air_date?: string;
+  genres?: TMDBGenre[];
+  production_countries?: TMDBProductionCountry[];
+  external_ids?: TMDBExternalIds;
+  credits?: TMDBCredits;
+  created_by?: TMDBCreator[];
+}
+
+interface TMDBSearchResult {
+  id: number;
+  title?: string;
+  name?: string;
+  overview?: string;
+  poster_path?: string;
+  release_date?: string;
+  first_air_date?: string;
+}
+
+interface TMDBSearchResponse {
+  results?: TMDBSearchResult[];
+}
+
+interface TMDBFindResponse {
+  movie_results?: TMDBSearchResult[];
+  tv_results?: TMDBSearchResult[];
+}
+
+interface SearchResultWithMetadata extends TMDBSearchResult {
+  mediaType: 'movie' | 'tv';
+  genres?: string[];
+  genreMatchScore?: number;
+  yearMatchScore?: number;
+  totalScore?: number;
+  resultYear?: number | null;
+}
+
+// Type definitions for our return types
 interface TMDBResult {
   posterUrl: string | null;
   overview: string | null;
@@ -52,6 +146,12 @@ interface OMDBResult {
   metascore: number | null;
 }
 
+const extractYearFromTitle = (title: string): number | undefined => {
+  const regex = /\((\d{4})\)/;
+  const match = regex.exec(title);
+  return match ? Number.parseInt(match[1]) : undefined;
+};
+
 const fetchOMDBData = async (imdbId: string): Promise<OMDBResult> => {
   if (!OMDB_API_KEY || !imdbId) return {
     imdbRating: null,
@@ -63,7 +163,7 @@ const fetchOMDBData = async (imdbId: string): Promise<OMDBResult> => {
     const response = await fetch(
       `http://www.omdbapi.com/?apikey=${OMDB_API_KEY}&i=${imdbId}`
     );
-    const data = await response.json();
+    const data = await response.json() as OMDBResponse;
     
     if (data.Response === 'False') {
       return {
@@ -82,7 +182,7 @@ const fetchOMDBData = async (imdbId: string): Promise<OMDBResult> => {
     let tomatometer: number | null = null;
     
     if (data.Ratings) {
-      const rtRating = data.Ratings.find((r: any) => r.Source === 'Rotten Tomatoes');
+      const rtRating = data.Ratings.find((r) => r.Source === 'Rotten Tomatoes');
       if (rtRating?.Value) {
         const match = rtRating.Value.match(/(\d+)%/);
         if (match) {
@@ -140,16 +240,16 @@ const fetchTMDBData = async (
       const findResponse = await fetch(
         `https://api.themoviedb.org/3/find/${existingImdbId}?api_key=${TMDB_API_KEY}&external_source=imdb_id`
       );
-      const findData = await findResponse.json();
+      const findData = await findResponse.json() as TMDBFindResponse;
       
-      let result;
+      let result: TMDBSearchResult | undefined;
       let mediaType: 'movie' | 'tv' | undefined;
       
       // Check movie results first
-      if (findData.movie_results?.length > 0) {
+      if (findData.movie_results?.length && findData.movie_results.length > 0) {
         result = findData.movie_results[0];
         mediaType = 'movie';
-      } else if (findData.tv_results?.length > 0) {
+      } else if (findData.tv_results?.length && findData.tv_results.length > 0) {
         result = findData.tv_results[0];
         mediaType = 'tv';
       }
@@ -159,49 +259,49 @@ const fetchTMDBData = async (
         const detailsResponse = await fetch(
           `https://api.themoviedb.org/3/${mediaType}/${result.id}?api_key=${TMDB_API_KEY}&append_to_response=credits`
         );
-        const details = await detailsResponse.json();
+        const details = await detailsResponse.json() as TMDBMovieDetails | TMDBTVDetails;
         
         // Extract runtime (only for movies, not TV shows)
         let runtime: number | null = null;
-        if (mediaType === 'movie') {
+        if (mediaType === 'movie' && 'runtime' in details) {
           runtime = details.runtime || null;
         }
         
         // Extract year
         let releaseYear: number | null = null;
-        if (mediaType === 'movie' && details.release_date) {
+        if (mediaType === 'movie' && 'release_date' in details && details.release_date) {
           releaseYear = Number.parseInt(details.release_date.split('-')[0]);
-        } else if (mediaType === 'tv' && details.first_air_date) {
+        } else if (mediaType === 'tv' && 'first_air_date' in details && details.first_air_date) {
           releaseYear = Number.parseInt(details.first_air_date.split('-')[0]);
         }
         
         // Extract genres
-        const genres = details.genres?.map((g: any) => g.name) || [];
+        const genres = details.genres?.map((genre) => genre.name) || [];
         
         // Extract directors
         const directors: string[] = [];
-        if (mediaType === 'movie') {
+        if (mediaType === 'movie' && 'credits' in details) {
           const crew = details.credits?.crew || [];
           directors.push(...crew
-            .filter((c: any) => c.job === 'Director')
-            .map((c: any) => c.name));
-        } else {
-          directors.push(...(details.created_by || []).map((c: any) => c.name));
+            .filter((c) => c.job === 'Director')
+            .map((c) => c.name));
+        } else if (mediaType === 'tv' && 'created_by' in details) {
+          directors.push(...(details.created_by || []).map((c) => c.name));
         }
         
         // Extract writers
         const writers: string[] = [];
-        if (mediaType === 'movie') {
+        if (mediaType === 'movie' && 'credits' in details) {
           const crew = details.credits?.crew || [];
           writers.push(...crew
-            .filter((c: any) => c.job === 'Writer' || c.job === 'Screenplay' || c.job === 'Story')
-            .map((c: any) => c.name));
-        } else {
-          writers.push(...(details.created_by || []).map((c: any) => c.name));
+            .filter((c) => c.job === 'Writer' || c.job === 'Screenplay' || c.job === 'Story')
+            .map((c) => c.name));
+        } else if (mediaType === 'tv' && 'created_by' in details) {
+          writers.push(...(details.created_by || []).map((c) => c.name));
         }
         
         // Extract production countries
-        const countries = details.production_countries?.map((c: any) => c.name) || [];
+        const countries = details.production_countries?.map((country) => country.name) || [];
         
         return {
           posterUrl: result.poster_path ? `https://image.tmdb.org/t/p/w500${result.poster_path}` : null,
@@ -234,18 +334,18 @@ const fetchTMDBData = async (
       searchMovies = false;
     }
     
-    let result;
+    let result: SearchResultWithMetadata | undefined;
     let mediaType: 'movie' | 'tv' | undefined = undefined;
-    let allResults: any[] = [];
+    let allResults: SearchResultWithMetadata[] = [];
     
     // Try movie search if allowed
     if (searchMovies) {
       const response = await fetch(
         `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_API_KEY}&query=${searchQuery}${yearParam}`
       );
-      const data = await response.json();
+      const data = await response.json() as TMDBSearchResponse;
       if (data.results && data.results.length > 0) {
-        allResults = data.results.map((r: any) => ({ ...r, mediaType: 'movie' }));
+        allResults = data.results.map((r) => ({ ...r, mediaType: 'movie' as const }));
       }
     }
     
@@ -254,9 +354,9 @@ const fetchTMDBData = async (
       const response = await fetch(
         `https://api.themoviedb.org/3/search/tv?api_key=${TMDB_API_KEY}&query=${searchQuery}${yearParam}`
       );
-      const data = await response.json();
+      const data = await response.json() as TMDBSearchResponse;
       if (data.results && data.results.length > 0) {
-        allResults = data.results.map((r: any) => ({ ...r, mediaType: 'tv' }));
+        allResults = data.results.map((r) => ({ ...r, mediaType: 'tv' as const }));
       }
     }
     
@@ -268,48 +368,121 @@ const fetchTMDBData = async (
         
         // Fetch full details for each result to compare genres
         const resultsWithGenres = await Promise.all(
-          allResults.slice(0, 5).map(async (r: any) => {
+          allResults.slice(0, 5).map(async (r): Promise<SearchResultWithMetadata> => {
             try {
               const detailsResponse = await fetch(
                 `https://api.themoviedb.org/3/${r.mediaType}/${r.id}?api_key=${TMDB_API_KEY}`
               );
-              const details = await detailsResponse.json();
-              const genres = details.genres?.map((g: any) => g.name) || [];
+              const details = await detailsResponse.json() as TMDBMovieDetails | TMDBTVDetails;
+              const genres = details.genres?.map((genre) => genre.name) || [];
+              
+              // Get result year
+              const resultYear = r.mediaType === 'movie' && 'release_date' in details && details.release_date
+                ? parseInt(details.release_date.split('-')[0])
+                : r.mediaType === 'tv' && 'first_air_date' in details && details.first_air_date
+                ? parseInt(details.first_air_date.split('-')[0])
+                : null;
               
               // Calculate genre match score
               const matchingGenres = existingGenres.filter(eg => 
-                genres.some(g => g.toLowerCase() === eg.toLowerCase())
+                genres.some(genre => genre.toLowerCase() === eg.toLowerCase())
               );
               const genreMatchScore = matchingGenres.length;
+              
+              // Calculate year match score (exact match = 100, within 1 year = 50, within 2 = 25, else 0)
+              let yearMatchScore = 0;
+              if (year && resultYear) {
+                const yearDiff = Math.abs(year - resultYear);
+                if (yearDiff === 0) yearMatchScore = 100;
+                else if (yearDiff === 1) yearMatchScore = 50;
+                else if (yearDiff === 2) yearMatchScore = 25;
+              }
+              
+              // Combined score: prioritize exact year match, then genres
+              const totalScore = yearMatchScore + (genreMatchScore * 10);
               
               return {
                 ...r,
                 genres,
-                genreMatchScore
+                genreMatchScore,
+                yearMatchScore,
+                totalScore,
+                resultYear
               };
             } catch {
-              return { ...r, genres: [], genreMatchScore: 0 };
+              return { ...r, genres: [], genreMatchScore: 0, yearMatchScore: 0, totalScore: 0, resultYear: null };
             }
           })
         );
         
-        // Sort by genre match score (descending) and take the best match
-        resultsWithGenres.sort((a, b) => b.genreMatchScore - a.genreMatchScore);
+        // Sort by total score (year + genre match)
+        resultsWithGenres.sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0));
         
         // Only use genre-based selection if we actually have a match
-        if (resultsWithGenres[0].genreMatchScore > 0) {
-          logger.info(`Found better match using genres: ${resultsWithGenres[0].genreMatchScore} matching genres`);
+        if (resultsWithGenres[0] && (resultsWithGenres[0].totalScore || 0) > 0) {
+          logger.info(`Found better match - Year: ${resultsWithGenres[0].resultYear} (score: ${resultsWithGenres[0].yearMatchScore}), Genres: ${resultsWithGenres[0].genreMatchScore} matches`);
           result = resultsWithGenres[0];
           mediaType = result.mediaType;
         } else {
           // No genre match, use first result
           result = allResults[0];
-          mediaType = result.mediaType;
+          mediaType = result?.mediaType;
+        }
+      } else if (year) {
+        // No existing genres, but we have a year - use it to find best match
+        logger.info(`Using year ${year} to find best match`);
+        
+        const resultsWithYear = await Promise.all(
+          allResults.slice(0, 5).map(async (r): Promise<SearchResultWithMetadata> => {
+            try {
+              const detailsResponse = await fetch(
+                `https://api.themoviedb.org/3/${r.mediaType}/${r.id}?api_key=${TMDB_API_KEY}`
+              );
+              const details = await detailsResponse.json() as TMDBMovieDetails | TMDBTVDetails;
+              
+              // Get result year
+              const resultYear = r.mediaType === 'movie' && 'release_date' in details && details.release_date
+                ? parseInt(details.release_date.split('-')[0])
+                : r.mediaType === 'tv' && 'first_air_date' in details && details.first_air_date
+                ? parseInt(details.first_air_date.split('-')[0])
+                : null;
+              
+              // Calculate year match score
+              let yearMatchScore = 0;
+              if (resultYear) {
+                const yearDiff = Math.abs(year - resultYear);
+                if (yearDiff === 0) yearMatchScore = 100;
+                else if (yearDiff === 1) yearMatchScore = 50;
+                else if (yearDiff === 2) yearMatchScore = 25;
+              }
+              
+              return {
+                ...r,
+                yearMatchScore,
+                resultYear
+              };
+            } catch {
+              return { ...r, yearMatchScore: 0, resultYear: null };
+            }
+          })
+        );
+        
+        // Sort by year match
+        resultsWithYear.sort((a, b) => (b.yearMatchScore || 0) - (a.yearMatchScore || 0));
+        
+        if (resultsWithYear[0] && (resultsWithYear[0].yearMatchScore || 0) > 0) {
+          logger.info(`Found match with year ${resultsWithYear[0].resultYear}`);
+          result = resultsWithYear[0];
+          mediaType = result?.mediaType;
+        } else {
+          // No good year match, use first result
+          result = allResults[0];
+          mediaType = result?.mediaType;
         }
       } else {
-        // No existing genres, use first result
+        // No existing genres or year, use first result
         result = allResults[0];
-        mediaType = result.mediaType;
+        mediaType = result?.mediaType;
       }
     }
     
@@ -318,52 +491,52 @@ const fetchTMDBData = async (
       const detailsResponse = await fetch(
         `https://api.themoviedb.org/3/${mediaType}/${result.id}?api_key=${TMDB_API_KEY}&append_to_response=credits`
       );
-      const details = await detailsResponse.json();
+      const details = await detailsResponse.json() as TMDBMovieDetails | TMDBTVDetails;
       
       // Extract runtime (only for movies, not TV shows)
       let runtime: number | null = null;
-      if (mediaType === 'movie') {
+      if (mediaType === 'movie' && 'runtime' in details) {
         runtime = details.runtime || null;
       }
       
       // Extract year
       let releaseYear: number | null = null;
-      if (mediaType === 'movie' && details.release_date) {
+      if (mediaType === 'movie' && 'release_date' in details && details.release_date) {
         releaseYear = parseInt(details.release_date.split('-')[0]);
-      } else if (mediaType === 'tv' && details.first_air_date) {
+      } else if (mediaType === 'tv' && 'first_air_date' in details && details.first_air_date) {
         releaseYear = parseInt(details.first_air_date.split('-')[0]);
       }
       
       // Extract genres
-      const genres = details.genres?.map((g: any) => g.name) || [];
+      const genres = details.genres?.map((genre) => genre.name) || [];
       
       // Extract directors
       const directors: string[] = [];
-      if (mediaType === 'movie') {
+      if (mediaType === 'movie' && 'credits' in details) {
         const crew = details.credits?.crew || [];
         directors.push(...crew
-          .filter((c: any) => c.job === 'Director')
-          .map((c: any) => c.name));
-      } else {
-        directors.push(...(details.created_by || []).map((c: any) => c.name));
+          .filter((c) => c.job === 'Director')
+          .map((c) => c.name));
+      } else if (mediaType === 'tv' && 'created_by' in details) {
+        directors.push(...(details.created_by || []).map((c) => c.name));
       }
       
       // Extract writers
       const writers: string[] = [];
-      if (mediaType === 'movie') {
+      if (mediaType === 'movie' && 'credits' in details) {
         const crew = details.credits?.crew || [];
         writers.push(...crew
-          .filter((c: any) => c.job === 'Writer' || c.job === 'Screenplay' || c.job === 'Story')
-          .map((c: any) => c.name));
-      } else {
-        writers.push(...(details.created_by || []).map((c: any) => c.name));
+          .filter((c) => c.job === 'Writer' || c.job === 'Screenplay' || c.job === 'Story')
+          .map((c) => c.name));
+      } else if (mediaType === 'tv' && 'created_by' in details) {
+        writers.push(...(details.created_by || []).map((c) => c.name));
       }
       
       // Extract production countries
-      const countries = details.production_countries?.map((c: any) => c.name) || [];
+      const countries = details.production_countries?.map((country) => country.name) || [];
       
       // Get IMDB ID
-      const imdbId = details.imdb_id || details.external_ids?.imdb_id || null;
+      const imdbId = ('imdb_id' in details && details.imdb_id) || details.external_ids?.imdb_id || null;
       
       return {
         posterUrl: result.poster_path ? `https://image.tmdb.org/t/p/w500${result.poster_path}` : null,
@@ -463,7 +636,7 @@ const run = async () => {
     const existingImdbId = page.properties['IMDB ID']?.rich_text?.[0]?.plain_text;
     
     // Get existing genres if present (for better search disambiguation)
-    const existingGenres = page.properties.Genre?.multi_select?.map((g: any) => g.name) || [];
+    const existingGenres = page.properties.Genre?.multi_select?.map((genre: { name: string }) => genre.name) || [];
     
     logger.info(`Processing: ${title}${existingType ? ` [Type: ${existingType}]` : ''}${existingImdbId ? ` [IMDB: ${existingImdbId}]` : ''}${existingGenres.length > 0 ? ` [Genres: ${existingGenres.join(', ')}]` : ''}`);
     
@@ -475,7 +648,7 @@ const run = async () => {
       continue;
     }
     
-    const additionalUpdates: any = {};
+    const additionalUpdates: UpdatePageParameters['properties'] = {};
     
     // Set cover if needed
     if (!page.cover && tmdbData.posterUrl) {
@@ -529,20 +702,20 @@ const run = async () => {
     }
     
     // Genre - merge with existing genres
-    const hasGenre = page.properties.Genre?.multi_select?.length > 0;
+    const hasGenre = page.properties.Genre?.multi_select?.length ?? 0 > 0;
     if (!hasGenre && tmdbData.genres.length > 0) {
       additionalUpdates.Genre = {
-        multi_select: tmdbData.genres.map(g => ({ name: g }))
+        multi_select: tmdbData.genres.map((genre: string) => ({ name: genre }))
       };
     } else if (hasGenre && tmdbData.genres.length > 0) {
       // Merge: keep existing genres and add new ones that don't exist
-      const existingGenreNames = existingGenres.map(g => g.toLowerCase());
-      const newGenres = tmdbData.genres.filter(g => 
-        !existingGenreNames.includes(g.toLowerCase())
+      const existingGenreNames = existingGenres.map((genre: string) => genre.toLowerCase());
+      const newGenres = tmdbData.genres.filter((genre: string) => 
+        !existingGenreNames.includes(genre.toLowerCase())
       );
       if (newGenres.length > 0) {
         additionalUpdates.Genre = {
-          multi_select: [...existingGenres.map(g => ({ name: g })), ...newGenres.map(g => ({ name: g }))]
+          multi_select: [...existingGenres.map((genre: string) => ({ name: genre })), ...newGenres.map((genre: string) => ({ name: genre }))]
         };
       }
     }
