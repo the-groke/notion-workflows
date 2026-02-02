@@ -111,7 +111,13 @@ const fetchOMDBData = async (imdbId: string): Promise<OMDBResult> => {
   }
 };
 
-const fetchTMDBData = async (title: string, year?: number, existingImdbId?: string, existingType?: string): Promise<TMDBResult> => {
+const fetchTMDBData = async (
+  title: string, 
+  year?: number, 
+  existingImdbId?: string, 
+  existingType?: string,
+  existingGenres?: string[]
+): Promise<TMDBResult> => {
   if (!TMDB_API_KEY) return { 
     posterUrl: null, 
     overview: null, 
@@ -230,6 +236,7 @@ const fetchTMDBData = async (title: string, year?: number, existingImdbId?: stri
     
     let result;
     let mediaType: 'movie' | 'tv' | undefined = undefined;
+    let allResults: any[] = [];
     
     // Try movie search if allowed
     if (searchMovies) {
@@ -237,21 +244,72 @@ const fetchTMDBData = async (title: string, year?: number, existingImdbId?: stri
         `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_API_KEY}&query=${searchQuery}${yearParam}`
       );
       const data = await response.json();
-      result = data.results?.[0];
-      if (result) {
-        mediaType = 'movie';
+      if (data.results && data.results.length > 0) {
+        allResults = data.results.map((r: any) => ({ ...r, mediaType: 'movie' }));
       }
     }
     
     // If no movie found and TV search is allowed, try TV search
-    if (!result && searchTV) {
+    if (allResults.length === 0 && searchTV) {
       const response = await fetch(
         `https://api.themoviedb.org/3/search/tv?api_key=${TMDB_API_KEY}&query=${searchQuery}${yearParam}`
       );
       const data = await response.json();
-      result = data.results?.[0];
-      if (result) {
-        mediaType = 'tv';
+      if (data.results && data.results.length > 0) {
+        allResults = data.results.map((r: any) => ({ ...r, mediaType: 'tv' }));
+      }
+    }
+    
+    // If we have existing genres, try to find a better match
+    if (allResults.length > 0) {
+      // If we have existing genres to help disambiguate
+      if (existingGenres && existingGenres.length > 0) {
+        logger.info(`Using existing genres to disambiguate: ${existingGenres.join(', ')}`);
+        
+        // Fetch full details for each result to compare genres
+        const resultsWithGenres = await Promise.all(
+          allResults.slice(0, 5).map(async (r: any) => {
+            try {
+              const detailsResponse = await fetch(
+                `https://api.themoviedb.org/3/${r.mediaType}/${r.id}?api_key=${TMDB_API_KEY}`
+              );
+              const details = await detailsResponse.json();
+              const genres = details.genres?.map((g: any) => g.name) || [];
+              
+              // Calculate genre match score
+              const matchingGenres = existingGenres.filter(eg => 
+                genres.some(g => g.toLowerCase() === eg.toLowerCase())
+              );
+              const genreMatchScore = matchingGenres.length;
+              
+              return {
+                ...r,
+                genres,
+                genreMatchScore
+              };
+            } catch {
+              return { ...r, genres: [], genreMatchScore: 0 };
+            }
+          })
+        );
+        
+        // Sort by genre match score (descending) and take the best match
+        resultsWithGenres.sort((a, b) => b.genreMatchScore - a.genreMatchScore);
+        
+        // Only use genre-based selection if we actually have a match
+        if (resultsWithGenres[0].genreMatchScore > 0) {
+          logger.info(`Found better match using genres: ${resultsWithGenres[0].genreMatchScore} matching genres`);
+          result = resultsWithGenres[0];
+          mediaType = result.mediaType;
+        } else {
+          // No genre match, use first result
+          result = allResults[0];
+          mediaType = result.mediaType;
+        }
+      } else {
+        // No existing genres, use first result
+        result = allResults[0];
+        mediaType = result.mediaType;
       }
     }
     
@@ -356,21 +414,29 @@ const run = async () => {
   logger.info("Pages retrieved", { count: pages.length });
 
   // Find pages missing any metadata
-  const needsMetadata = pages.filter(page => 
-    !page.cover || 
-    !page.properties.Overview?.rich_text?.[0]?.plain_text ||
-    !page.properties.Type?.select?.name ||
-    page.properties.Year?.number == null ||
-    page.properties['Runtime (Raw)']?.number == null ||
-    page.properties.Genre?.multi_select?.length === 0 ||
-    !page.properties['Director(s)']?.rich_text?.[0]?.plain_text ||
-    !page.properties['Writer(s)']?.rich_text?.[0]?.plain_text ||
-    !page.properties.Country?.rich_text?.[0]?.plain_text ||
-    !page.properties['IMDB ID']?.rich_text?.[0]?.plain_text ||
-    page.properties['IMDB Score']?.number == null ||
-    page.properties['Tomatometer (Raw)']?.number == null ||
-    page.properties['Metascore']?.number == null
-  );
+  const needsMetadata = pages.filter(page => {
+    const title = extractTitle(page);
+    const yearInTitle = extractYearFromTitle(title);
+    const yearInProperty = page.properties.Year?.number;
+    const titleMissingYear = !yearInTitle && yearInProperty;
+    
+    return (
+      !page.cover || 
+      !page.properties.Overview?.rich_text?.[0]?.plain_text ||
+      !page.properties.Type?.select?.name ||
+      page.properties.Year?.number == null ||
+      page.properties['Runtime (Raw)']?.number == null ||
+      page.properties.Genre?.multi_select?.length === 0 ||
+      !page.properties['Director(s)']?.rich_text?.[0]?.plain_text ||
+      !page.properties['Writer(s)']?.rich_text?.[0]?.plain_text ||
+      !page.properties.Country?.rich_text?.[0]?.plain_text ||
+      !page.properties['IMDB ID']?.rich_text?.[0]?.plain_text ||
+      page.properties['IMDB Score']?.number == null ||
+      page.properties['Tomatometer (Raw)']?.number == null ||
+      page.properties['Metascore']?.number == null ||
+      titleMissingYear
+    );
+  });
   
   if (needsMetadata.length === 0) {
     logger.info("All pages already have complete metadata!");
@@ -380,16 +446,28 @@ const run = async () => {
   logger.info(`Found ${needsMetadata.length} pages needing metadata`);
   
   for (const page of needsMetadata) {
-    const title = extractTitle(page);
-    const year = extractYearFromTitle(title);
+    let title = extractTitle(page);
+    let year = extractYearFromTitle(title);
+    let titleNeedsUpdate = false;
+    
+    // If title doesn't have year but we can determine year from existing data, append it
+    if (!year && page.properties.Year?.number) {
+      const existingYear = page.properties.Year.number;
+      title = `${title} (${existingYear})`;
+      year = existingYear;
+      titleNeedsUpdate = true;
+    }
     
     // Get existing Type and IMDB ID if present
     const existingType = page.properties.Type?.select?.name;
     const existingImdbId = page.properties['IMDB ID']?.rich_text?.[0]?.plain_text;
     
-    logger.info(`Processing: ${title}${existingType ? ` [Type: ${existingType}]` : ''}${existingImdbId ? ` [IMDB: ${existingImdbId}]` : ''}`);
+    // Get existing genres if present (for better search disambiguation)
+    const existingGenres = page.properties.Genre?.multi_select?.map((g: any) => g.name) || [];
     
-    const tmdbData = await fetchTMDBData(title, year, existingImdbId, existingType);
+    logger.info(`Processing: ${title}${existingType ? ` [Type: ${existingType}]` : ''}${existingImdbId ? ` [IMDB: ${existingImdbId}]` : ''}${existingGenres.length > 0 ? ` [Genres: ${existingGenres.join(', ')}]` : ''}`);
+    
+    const tmdbData = await fetchTMDBData(title, year, existingImdbId, existingType, existingGenres);
     
     if (!tmdbData.type && !existingType) {
       logger.warn(`Could not find TMDB data for ${title}`);
@@ -435,6 +513,11 @@ const run = async () => {
       const yearToUse = tmdbData.year || year;
       if (yearToUse) {
         additionalUpdates.Year = { number: yearToUse };
+        // If we're setting the year for the first time and title doesn't have it, mark for update
+        if (!extractYearFromTitle(extractTitle(page))) {
+          title = `${extractTitle(page)} (${yearToUse})`;
+          titleNeedsUpdate = true;
+        }
       }
     }
     
@@ -445,12 +528,23 @@ const run = async () => {
       additionalUpdates['Runtime (Raw)'] = { number: tmdbData.runtime };
     }
     
-    // Genre
+    // Genre - merge with existing genres
     const hasGenre = page.properties.Genre?.multi_select?.length > 0;
     if (!hasGenre && tmdbData.genres.length > 0) {
       additionalUpdates.Genre = {
         multi_select: tmdbData.genres.map(g => ({ name: g }))
       };
+    } else if (hasGenre && tmdbData.genres.length > 0) {
+      // Merge: keep existing genres and add new ones that don't exist
+      const existingGenreNames = existingGenres.map(g => g.toLowerCase());
+      const newGenres = tmdbData.genres.filter(g => 
+        !existingGenreNames.includes(g.toLowerCase())
+      );
+      if (newGenres.length > 0) {
+        additionalUpdates.Genre = {
+          multi_select: [...existingGenres.map(g => ({ name: g })), ...newGenres.map(g => ({ name: g }))]
+        };
+      }
     }
     
     // Directors
@@ -503,10 +597,17 @@ const run = async () => {
       }
       
       // Metascore
-      const hasMetascore = page.properties['Metascore']?.number != null;
+      const hasMetascore = page.properties['Metascore']?.number == null;
       if (!hasMetascore && omdbData.metascore) {
         additionalUpdates['Metascore'] = { number: omdbData.metascore };
       }
+    }
+    
+    // Add title update if needed
+    if (titleNeedsUpdate) {
+      additionalUpdates['Name'] = {
+        title: [{ text: { content: title } }]
+      };
     }
     
     // Update all properties at once
