@@ -154,17 +154,11 @@ const run = async () => {
     pages: allPubs,
     extractName: extractTitle,
     buildPrompt,
-    parseResponse: (json) => {
-      const pubsData = parseResponse(json);
-      // Store the data keyed by page index
-      pubsData.forEach((data, index) => {
-        if (allPubs[index]) {
-          pubDataMap.set(allPubs[index].id, data);
-        }
-      });
-      return pubsData;
-    },
+    parseResponse,
     buildUpdates: (page, data) => {
+      // Store the data for route building later
+      pubDataMap.set(page.id, data);
+      
       // Force update route order and distance, only skip overview if already filled
       const props = page.properties;
       const updates: Record<string, unknown> = {};
@@ -191,6 +185,7 @@ const run = async () => {
 
   // Build route from the data we just calculated
   logger.info("Updating pub crawl route...");
+  logger.info("Captured data for pubs:", { count: pubDataMap.size });
   
   const pubsForRoute = allPubs
     .map(page => {
