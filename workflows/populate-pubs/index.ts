@@ -157,6 +157,7 @@ const run = async () => {
     parseResponse,
     buildUpdates: (page, data) => {
       // Store the data for route building later
+      logger.info("buildUpdates called with data:", { pageId: page.id, data });
       pubDataMap.set(page.id, data);
       
       // Force update route order and distance, only skip overview if already filled
@@ -186,6 +187,8 @@ const run = async () => {
   // Build route from the data we just calculated
   logger.info("Updating pub crawl route...");
   logger.info("Captured data for pubs:", { count: pubDataMap.size });
+  logger.info("allPubs length:", { length: allPubs.length });
+  logger.info("About to map over allPubs...");
   
   const pubsForRoute = allPubs
     .map(page => {
@@ -195,7 +198,7 @@ const run = async () => {
         return null;
       }
       
-      const nameProperty = page.properties.Name;
+      const nameProperty = page.properties.Pub;
       const locationProperty = page.properties.Location;
       
       const name = nameProperty?.type === "title" 
