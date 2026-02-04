@@ -190,7 +190,10 @@ const run = async () => {
   const pubsForRoute = allPubs
     .map(page => {
       const data = pubDataMap.get(page.id);
-      if (!data) return null;
+      if (!data) {
+        logger.warn("No data found for page:", { id: page.id });
+        return null;
+      }
       
       const nameProperty = page.properties.Name;
       const locationProperty = page.properties.Location;
@@ -203,16 +206,31 @@ const run = async () => {
         ? locationProperty.rich_text[0]?.plain_text || ""
         : "";
       
+      logger.info("Processing pub for route:", { 
+        name, 
+        location, 
+        routeOrder: data.routeOrder,
+        hasName: !!name,
+        hasLocation: !!location,
+        routeOrderGreaterThanZero: data.routeOrder > 0
+      });
+      
       return {
         name,
         location: location || name,
         routeOrder: data.routeOrder
       };
     })
-    .filter((p): p is { name: string; location: string; routeOrder: number } => 
-      p !== null && p.name !== "" && p.routeOrder > 0
-    )
+    .filter((p): p is { name: string; location: string; routeOrder: number } => {
+      const isValid = p !== null && p.name !== "" && p.routeOrder > 0;
+      if (p && !isValid) {
+        logger.warn("Filtering out pub:", { pub: p, reason: !p.name ? "no name" : !p.routeOrder ? "no route order" : "route order <= 0" });
+      }
+      return isValid;
+    })
     .sort((a, b) => a.routeOrder - b.routeOrder);
+
+  logger.info("Pubs after filtering:", { count: pubsForRoute.length, pubs: pubsForRoute });
 
   if (pubsForRoute.length === 0) {
     logger.warn("No pubs with route order found");
