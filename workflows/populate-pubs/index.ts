@@ -136,6 +136,71 @@ const deleteExistingRouteBlocks = async (): Promise<void> => {
   }
 };
 
+// Generate Google Maps route URL and update the page
+const updatePageWithRoute = async (pages: PageObjectResponse[]): Promise<void> => {
+  const pubsWithLocations = pages
+    .filter(p => "properties" in p)
+    .map(p => {
+      const nameProperty = p.properties.Pub;
+      const locationProperty = p.properties.Location;
+      const routeOrderProperty = p.properties["Route order"];
+      
+      const name = nameProperty?.type === "title" 
+        ? nameProperty.title[0]?.plain_text || ""
+        : "";
+      
+      const location = locationProperty?.type === "rich_text"
+        ? locationProperty.rich_text[0]?.plain_text || ""
+        : "";
+        
+      const routeOrder = routeOrderProperty?.type === "number"
+        ? routeOrderProperty.number || 0
+        : 0;
+      
+      return { name, location: location || name, routeOrder };
+    })
+    .filter(p => p.name && p.routeOrder > 0)
+    .sort((a, b) => a.routeOrder - b.routeOrder);
+
+  if (pubsWithLocations.length === 0) {
+    logger.warn("No pubs with route order found");
+    return;
+  }
+
+  const waypoints = pubsWithLocations
+    .map(p => encodeURIComponent(`${p.location}`))
+    .join("/");
+  
+  const routeUrl = `https://www.google.com/maps/dir/${STATION_WAYPOINT}/${waypoints}`;
+
+  // Delete old route blocks first
+  await deleteExistingRouteBlocks();
+  
+  // Update page with embedded bookmark to Google Maps route
+  await notion.blocks.children.append({
+    block_id: PAGE_ID,
+    children: [
+      {
+        object: "block",
+        type: "heading_2",
+        heading_2: {
+          rich_text: [{ type: "text", text: { content: "🗺️ Pub Crawl Route" } }]
+        }
+      },
+      {
+        object: "block",
+        type: "bookmark",
+        bookmark: {
+          url: routeUrl
+        }
+      }
+    ]
+  });
+
+  logger.success("Added Google Maps route to page");
+  logger.info("Route URL:", { url: routeUrl });
+};
+
 const run = async () => {
   logger.info("Fetching all pages from pubs database...");
   const pages = await getAllPages(DATABASE_ID, PRIVATE_INTEGRATION_TOKEN);
@@ -147,19 +212,12 @@ const run = async () => {
   // Always recalculate route for ALL pubs
   logger.info("Recalculating optimal route for all pubs...");
 
-  // Store the annotation data to use for route building
-  const pubDataMap = new Map<string, PubData>();
-
   await batchAnnotate<PubData>(ai, {
     pages: allPubs,
     extractName: extractTitle,
     buildPrompt,
     parseResponse,
     buildUpdates: (page, data) => {
-      // Store the data for route building later
-      logger.info("buildUpdates called with data:", { pageId: page.id, data });
-      pubDataMap.set(page.id, data);
-      
       // Force update route order and distance, only skip overview if already filled
       const props = page.properties;
       const updates: Record<string, unknown> = {};
@@ -184,97 +242,12 @@ const run = async () => {
 
   logger.success("Pubs completion complete");
 
-  // Build route from the data we just calculated
+  // Always update the route (in case pubs were added/reordered)
   logger.info("Updating pub crawl route...");
-  logger.info("Captured data for pubs:", { count: pubDataMap.size });
-  logger.info("allPubs length:", { length: allPubs.length });
-  logger.info("About to map over allPubs...");
-  
-  const pubsForRoute = allPubs
-    .map(page => {
-      const data = pubDataMap.get(page.id);
-      if (!data) {
-        logger.warn("No data found for page:", { id: page.id });
-        return null;
-      }
-      
-      const nameProperty = page.properties.Pub;
-      const locationProperty = page.properties.Location;
-      
-      const name = nameProperty?.type === "title" 
-        ? nameProperty.title[0]?.plain_text || ""
-        : "";
-      
-      const location = locationProperty?.type === "rich_text"
-        ? locationProperty.rich_text[0]?.plain_text || ""
-        : "";
-      
-      logger.info("Processing pub for route:", { 
-        name, 
-        location, 
-        routeOrder: data.routeOrder,
-        hasName: !!name,
-        hasLocation: !!location,
-        routeOrderGreaterThanZero: data.routeOrder > 0
-      });
-      
-      return {
-        name,
-        location: location || name,
-        routeOrder: data.routeOrder
-      };
-    })
-    .filter((p): p is { name: string; location: string; routeOrder: number } => {
-      const isValid = p !== null && p.name !== "" && p.routeOrder > 0;
-      if (p && !isValid) {
-        logger.warn("Filtering out pub:", { pub: p, reason: !p.name ? "no name" : !p.routeOrder ? "no route order" : "route order <= 0" });
-      }
-      return isValid;
-    })
-    .sort((a, b) => a.routeOrder - b.routeOrder);
-
-  logger.info("Pubs after filtering:", { count: pubsForRoute.length, pubs: pubsForRoute });
-
-  if (pubsForRoute.length === 0) {
-    logger.warn("No pubs with route order found");
-  } else {
-    const waypoints = pubsForRoute
-      .map(p => encodeURIComponent(p.location))
-      .join("/");
-    
-    const routeUrl = `https://www.google.com/maps/dir/${STATION_WAYPOINT}/${waypoints}`;
-    
-    logger.info("Generated route URL:", { url: routeUrl, length: routeUrl.length, pubCount: pubsForRoute.length });
-
-    if (routeUrl.length > 2000) {
-      logger.warn("Route URL is very long, it may not work properly:", { length: routeUrl.length });
-    }
-
-    await deleteExistingRouteBlocks();
-    
-    logger.info("Appending new blocks to page...", { pageId: PAGE_ID });
-    await notion.blocks.children.append({
-      block_id: PAGE_ID,
-      children: [
-        {
-          object: "block",
-          type: "heading_2",
-          heading_2: {
-            rich_text: [{ type: "text", text: { content: "🗺️ Pub Crawl Route" } }]
-          }
-        },
-        {
-          object: "block",
-          type: "bookmark",
-          bookmark: {
-            url: routeUrl
-          }
-        }
-      ]
-    });
-
-    logger.success("Added Google Maps route to page");
-  }
+  const allPages = await getAllPages(DATABASE_ID, PRIVATE_INTEGRATION_TOKEN);
+  await updatePageWithRoute(
+    allPages.filter((p): p is PageObjectResponse => "properties" in p)
+  );
   
   logger.success("✓ Done! Check your Notion page for the complete route map.");
 };
