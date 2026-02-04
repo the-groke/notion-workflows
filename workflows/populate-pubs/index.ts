@@ -22,6 +22,8 @@ import type { PageObjectResponse, BlockObjectResponse } from "@notionhq/client/b
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const PRIVATE_INTEGRATION_TOKEN = process.env.PRIVATE_INTEGRATION_TOKEN
+const STATION_WAYPOINT = process.env.STATION_WAYPOINT;
+const LOCATION = process.env.LOCATION;
 const DATABASE_ID = process.env.PUBS_DATABASE_ID;
 const PAGE_ID = process.env.PUBS_PAGE_ID;
 
@@ -40,6 +42,16 @@ if (!PAGE_ID) {
   process.exit(1);
 }
 
+if (!STATION_WAYPOINT) {
+  logger.error("STATION_WAYPOINT is not defined");
+  process.exit(1);
+}
+
+if (!process.env.LOCATION) {
+  logger.error("LOCATION is not defined");
+  process.exit(1);
+}
+
 const notion = createNotionClient(PRIVATE_INTEGRATION_TOKEN);
 const ai: AIClient = await createAIClient();
 
@@ -52,7 +64,7 @@ const buildPrompt = async (pubs: string[]): Promise<string> => {
   // replace {{PUBS_LIST}} in the prompt with the actual list of pubs and {{LOCATION}} with the home location
   return promptTemplate
     .replace("{{PUBS_LIST}}", pubsList)
-    .replace("{{LOCATION}}", process.env.LOCATION);
+    .replace("{{LOCATION}}", LOCATION ?? "");
 };
 
 interface PubsResponse {

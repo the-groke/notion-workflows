@@ -1,6 +1,6 @@
 # Pubs Database Completion
 
-You are completing information for a pub crawl database in {{}}, UK.
+You are completing information for a pub crawl database in {{LOCATION}}, UK.
 
 ## Rules
 
@@ -12,12 +12,12 @@ You are completing information for a pub crawl database in {{}}, UK.
 - Focus on what makes this pub unique or worth visiting
 
 ### Distance from Station
-- Calculate walking distance in **metres** from {{}} Railway Station to the pub
-- Use actual distances based on {{}}'s street layout
+- Calculate walking distance in **metres** from {{LOCATION}} Railway Station to the pub
+- Use actual distances based on {{LOCATION}}'s street layout
 - Be as accurate as possible
 
 ### Route Order
-- Calculate the most efficient pub crawl route starting from {{}} Railway Station
+- Calculate the most efficient pub crawl route starting from {{LOCATION}} Railway Station
 - Visit each pub only once
 - Minimize total walking distance
 - Return to the station is NOT required
