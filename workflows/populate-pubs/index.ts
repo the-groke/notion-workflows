@@ -7,7 +7,6 @@ import {
   createNotionClient,
   getAllPages,
   extractTitle,
-  buildPropertyUpdates,
   updatePage,
   getAllBlocks,
 } from "utils/notion";
@@ -15,7 +14,6 @@ import { createAIClient, batchAnnotate, type AIClient } from "utils/ai";
 import { logger } from "utils/logger";
 // Config
 import {
-  FIELD_MAPPINGS,
   type PubData,
 } from "./config";
 // Types
@@ -24,8 +22,8 @@ import type { PageObjectResponse, BlockObjectResponse } from "@notionhq/client/b
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const PRIVATE_INTEGRATION_TOKEN = process.env.PRIVATE_INTEGRATION_TOKEN
-const DATABASE_ID = process.env.YORK_PUBS_DATABASE_ID;
-const PAGE_ID = process.env.YORK_PUBS_PAGE_ID;
+const DATABASE_ID = process.env.PUBS_DATABASE_ID;
+const PAGE_ID = process.env.PUBS_PAGE_ID;
 
 if (!PRIVATE_INTEGRATION_TOKEN) {
   logger.error("PRIVATE_INTEGRATION_TOKEN is not defined");
@@ -33,12 +31,12 @@ if (!PRIVATE_INTEGRATION_TOKEN) {
 }
 
 if (!DATABASE_ID) {
-  logger.error("YORK_PUBS_DATABASE_ID is not defined");
+  logger.error("PUBS_DATABASE_ID is not defined");
   process.exit(1);
 }
 
 if (!PAGE_ID) {
-  logger.error("YORK_PUBS_PAGE_ID is not defined");
+  logger.error("PUBS_PAGE_ID is not defined");
   process.exit(1);
 }
 
@@ -51,7 +49,10 @@ const buildPrompt = async (pubs: string[]): Promise<string> => {
     "utf-8"
   );
   const pubsList = pubs.map((p, i) => `${i + 1}. ${p}`).join("\n");
-  return promptTemplate.replace("{{PUBS_LIST}}", pubsList);
+  // replace {{PUBS_LIST}} in the prompt with the actual list of pubs and {{LOCATION}} with the home location
+  return promptTemplate
+    .replace("{{PUBS_LIST}}", pubsList)
+    .replace("{{LOCATION}}", process.env.LOCATION);
 };
 
 interface PubsResponse {
@@ -146,10 +147,10 @@ const updatePageWithRoute = async (pages: PageObjectResponse[]): Promise<void> =
   }
 
   const waypoints = pubsWithLocations
-    .map(p => encodeURIComponent(`${p.location}, York, UK`))
+    .map(p => encodeURIComponent(`${p.location}`))
     .join("/");
   
-  const routeUrl = `https://www.google.com/maps/dir/York+Railway+Station,+York,+UK/${waypoints}`;
+  const routeUrl = `https://www.google.com/maps/dir/${STATION_WAYPOINT}/${waypoints}`;
 
   // Delete old route blocks first
   await deleteExistingRouteBlocks();
@@ -180,7 +181,7 @@ const updatePageWithRoute = async (pages: PageObjectResponse[]): Promise<void> =
 };
 
 const run = async () => {
-  logger.info("Fetching all pages from York pubs database...");
+  logger.info("Fetching all pages from pubs database...");
   const pages = await getAllPages(DATABASE_ID, PRIVATE_INTEGRATION_TOKEN);
 
   logger.info("Pages retrieved", { count: pages.length });
@@ -218,7 +219,7 @@ const run = async () => {
     itemType: "pub",
   });
 
-  logger.success("York pubs completion complete");
+  logger.success("Pubs completion complete");
 
   // Always update the route (in case pubs were added/reordered)
   logger.info("Updating pub crawl route...");

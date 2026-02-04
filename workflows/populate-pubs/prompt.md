@@ -1,6 +1,6 @@
-# York Pubs Database Completion
+# Pubs Database Completion
 
-You are completing information for a pub crawl database in York, UK.
+You are completing information for a pub crawl database in {{}}, UK.
 
 ## Rules
 
@@ -12,12 +12,12 @@ You are completing information for a pub crawl database in York, UK.
 - Focus on what makes this pub unique or worth visiting
 
 ### Distance from Station
-- Calculate walking distance in **metres** from York Railway Station to the pub
-- Use actual distances based on York's street layout
+- Calculate walking distance in **metres** from {{}} Railway Station to the pub
+- Use actual distances based on {{}}'s street layout
 - Be as accurate as possible
 
 ### Route Order
-- Calculate the most efficient pub crawl route starting from York Railway Station
+- Calculate the most efficient pub crawl route starting from {{}} Railway Station
 - Visit each pub only once
 - Minimize total walking distance
 - Return to the station is NOT required

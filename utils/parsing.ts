@@ -10,6 +10,9 @@ export const parseMultiSelect = (text: string) =>
 export type PropertyBuilder = (value: string | number) => NotionPropertyRequest;
 
 export const propertyBuilders = {
+  title: (value: string | number): NotionPropertyRequest => ({
+    title: [{ text: { content: String(value) } }] 
+  }),
   richText: (value: string | number): NotionPropertyRequest => ({
     rich_text: [{ text: { content: String(value) } }] 
   }),

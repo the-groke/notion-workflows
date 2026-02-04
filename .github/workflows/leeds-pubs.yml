@@ -1,4 +1,4 @@
-name: Populate York Pubs Database
+name: Populate Leeds Pubs Database
 
 on:
   schedule:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  populate-york-pubs:
+  populate-leeds-pubs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,11 +20,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
       
-      - name: Populate York pubs data
-        run: npx tsx workflows/populate-york-pubs/index.ts
+      - name: Populate Leeds pubs data
+        run: npx tsx workflows/populate-leeds-pubs/index.ts
         env:
           PRIVATE_INTEGRATION_TOKEN: ${{ secrets.PRIVATE_INTEGRATION_TOKEN }}
-          PUBS_DATABASE_ID: ${{ secrets.YORK_PUBS_DATABASE_ID }}
+          PUBS_DATABASE_ID: ${{ secrets.LEEDS_PUBS_DATABASE_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          STATION_WAYPOINT: ${{ secrets.YORK_STATION_WAYPOINT }}
-          LOCATION: 'York'
+          STATION_WAYPOINT: ${{ secrets.LEEDS_STATION_WAYPOINT }}
+          LOCATION: 'Leeds'
