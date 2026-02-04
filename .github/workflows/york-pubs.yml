@@ -25,6 +25,7 @@ jobs:
         env:
           PRIVATE_INTEGRATION_TOKEN: ${{ secrets.PRIVATE_INTEGRATION_TOKEN }}
           PUBS_DATABASE_ID: ${{ secrets.YORK_PUBS_DATABASE_ID }}
+          PUBS_PAGE_ID: ${{ secrets.YORK_PUBS_PAGE_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           STATION_WAYPOINT: ${{ secrets.YORK_STATION_WAYPOINT }}
           LOCATION: 'York'
