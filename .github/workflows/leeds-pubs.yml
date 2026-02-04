@@ -21,7 +21,7 @@ jobs:
         run: npm ci
       
       - name: Populate Leeds pubs data
-        run: npx tsx workflows/populate-leeds-pubs/index.ts
+        run: npx tsx workflows/populate-pubs/index.ts
         env:
           PRIVATE_INTEGRATION_TOKEN: ${{ secrets.PRIVATE_INTEGRATION_TOKEN }}
           PUBS_DATABASE_ID: ${{ secrets.LEEDS_PUBS_DATABASE_ID }}
