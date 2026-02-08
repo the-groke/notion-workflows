@@ -1,31 +1,25 @@
 import 'dotenv/config';
-import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 // Utils
 import {
   createNotionClient,
   getAllPages,
-  extractTitle,
   updatePage,
   getAllBlocks,
 } from "utils/notion";
-import { createAIClient, batchAnnotate, type AIClient } from "utils/ai";
 import { logger } from "utils/logger";
-// Config
-import {
-  type PubData,
-} from "./config";
 // Types
 import type { PageObjectResponse, BlockObjectResponse } from "@notionhq/client/build/src/api-endpoints";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const PRIVATE_INTEGRATION_TOKEN = process.env.PRIVATE_INTEGRATION_TOKEN
+const PRIVATE_INTEGRATION_TOKEN = process.env.PRIVATE_INTEGRATION_TOKEN;
 const STATION_WAYPOINT = process.env.STATION_WAYPOINT;
 const LOCATION = process.env.LOCATION;
 const DATABASE_ID = process.env.PUBS_DATABASE_ID;
 const PAGE_ID = process.env.PUBS_PAGE_ID;
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
 if (!PRIVATE_INTEGRATION_TOKEN) {
   logger.error("PRIVATE_INTEGRATION_TOKEN is not defined");
@@ -47,57 +41,36 @@ if (!STATION_WAYPOINT) {
   process.exit(1);
 }
 
-if (!process.env.LOCATION) {
+if (!LOCATION) {
   logger.error("LOCATION is not defined");
   process.exit(1);
 }
 
-const notion = createNotionClient(PRIVATE_INTEGRATION_TOKEN);
-const ai: AIClient = await createAIClient();
-
-const buildPrompt = async (pubs: string[]): Promise<string> => {
-  const promptTemplate = await readFile(
-    join(__dirname, "prompt.md"),
-    "utf-8"
-  );
-  const pubsList = pubs.map((p, i) => `${i + 1}. ${p}`).join("\n");
-  // replace {{PUBS_LIST}} in the prompt with the actual list of pubs and {{LOCATION}} with the home location
-  return promptTemplate
-    .replace("{{PUBS_LIST}}", pubsList)
-    .replace("{{LOCATION}}", LOCATION ?? "");
-};
-
-interface PubsResponse {
-  pubs: PubData[];
+if (!GOOGLE_MAPS_API_KEY) {
+  logger.error("GOOGLE_MAPS_API_KEY is not defined");
+  process.exit(1);
 }
 
-type JsonValue = string | number | boolean | null | JsonObject | JsonArray;
-type JsonObject = { [key: string]: JsonValue };
-type JsonArray = JsonValue[];
+const notion = createNotionClient(PRIVATE_INTEGRATION_TOKEN);
 
-const isValidPubsResponse = (obj: JsonValue): obj is PubsResponse => {
-  if (typeof obj !== "object" || obj === null || Array.isArray(obj)) return false;
-  
-  const response = obj as Record<string, JsonValue>;
-  if (!Array.isArray(response.pubs)) return false;
-  
-  return response.pubs.every((pub) => {
-    if (typeof pub !== "object" || pub === null || Array.isArray(pub)) return false;
-    const p = pub as Record<string, JsonValue>;
-    return (
-      typeof p.overview === "string" &&
-      typeof p.distanceFromStation === "number" &&
-      typeof p.routeOrder === "number"
-    );
-  });
-};
+interface PubInfo {
+  id: string;
+  name: string;
+  location: string;
+  originalIndex: number;
+}
 
-const parseResponse = (json: JsonValue): PubData[] => {
-  if (!isValidPubsResponse(json)) {
-    throw new Error("Response missing 'pubs' array or invalid structure");
-  }
-  return json.pubs;
-};
+interface GoogleMapsDirectionsResponse {
+  routes: Array<{
+    waypoint_order: number[];
+    legs: Array<{
+      distance: {
+        value: number; // in metres
+      };
+    }>;
+  }>;
+  status: string;
+}
 
 // Delete existing route blocks from the page
 const deleteExistingRouteBlocks = async (): Promise<void> => {
@@ -136,39 +109,86 @@ const deleteExistingRouteBlocks = async (): Promise<void> => {
   }
 };
 
-// Generate Google Maps route URL and update the page
-const updatePageWithRoute = async (pages: PageObjectResponse[]): Promise<void> => {
-  const pubsWithLocations = pages
-    .filter(p => "properties" in p)
-    .map(p => {
-      const nameProperty = p.properties.Pub;
-      const locationProperty = p.properties.Location;
-      const routeOrderProperty = p.properties["Route order"];
-      
-      const name = nameProperty?.type === "title" 
-        ? nameProperty.title[0]?.plain_text || ""
-        : "";
-      
-      const location = locationProperty?.type === "rich_text"
-        ? locationProperty.rich_text[0]?.plain_text || ""
-        : "";
-        
-      const routeOrder = routeOrderProperty?.type === "number"
-        ? routeOrderProperty.number || 0
-        : 0;
-      
-      return { name, location: location || name, routeOrder };
-    })
-    .filter(p => p.name && p.routeOrder > 0)
-    .sort((a, b) => a.routeOrder - b.routeOrder);
+// Optimize route using Google Maps Directions API
+const optimizeRouteWithGoogle = async (pubs: PubInfo[]): Promise<{
+  optimizedOrder: number[];
+  distances: number[];
+}> => {
+  if (pubs.length === 0) {
+    return { optimizedOrder: [], distances: [] };
+  }
 
-  if (pubsWithLocations.length === 0) {
-    logger.warn("No pubs with route order found");
+  // Google Maps API has a limit of 25 waypoints
+  if (pubs.length > 25) {
+    logger.warn(`Too many pubs (${pubs.length}). Google Maps API supports max 25 waypoints. Using first 25.`);
+    pubs = pubs.slice(0, 25);
+  }
+
+  const waypoints = pubs.map(p => p.location).join('|');
+  
+  const url = new URL('https://maps.googleapis.com/maps/api/directions/json');
+  url.searchParams.set('origin', STATION_WAYPOINT);
+  url.searchParams.set('destination', STATION_WAYPOINT); // circular route back to station
+  url.searchParams.set('waypoints', `optimize:true|${waypoints}`);
+  url.searchParams.set('mode', 'walking');
+  url.searchParams.set('key', GOOGLE_MAPS_API_KEY!);
+
+  logger.info("Calling Google Maps Directions API...");
+  
+  const response = await fetch(url.toString());
+  const data: GoogleMapsDirectionsResponse = await response.json();
+
+  if (data.status !== 'OK') {
+    throw new Error(`Google Maps API error: ${data.status}`);
+  }
+
+  const route = data.routes[0];
+  const optimizedOrder = route.waypoint_order;
+  
+  // Extract distances (first leg is from station to first pub)
+  const distances = route.legs.map(leg => leg.distance.value);
+
+  logger.success(`Route optimized! Order: ${optimizedOrder.map(i => pubs[i].name).join(' → ')}`);
+
+  return { optimizedOrder, distances };
+};
+
+// Update Notion pages with route order and distances
+const updatePubsWithRouteData = async (
+  pubs: PubInfo[],
+  optimizedOrder: number[],
+  distances: number[]
+): Promise<void> => {
+  logger.info("Updating pub pages with route data...");
+
+  for (let routeOrder = 0; routeOrder < optimizedOrder.length; routeOrder++) {
+    const pubIndex = optimizedOrder[routeOrder];
+    const pub = pubs[pubIndex];
+    const distanceFromStation = distances[routeOrder]; // distance from previous waypoint
+
+    const updates = {
+      "Route order": { number: routeOrder + 1 }, // 1-indexed for humans
+      "Distance from station (metres)": { number: distanceFromStation }
+    };
+
+    await updatePage(notion, pub.id, updates);
+    
+    logger.info(`Updated ${pub.name}: order=${routeOrder + 1}, distance=${distanceFromStation}m`);
+  }
+
+  logger.success("All pubs updated with route data");
+};
+
+// Generate Google Maps route URL and update the page
+const updatePageWithRoute = async (pubs: PubInfo[], optimizedOrder: number[]): Promise<void> => {
+  if (pubs.length === 0) {
+    logger.warn("No pubs to create route");
     return;
   }
 
-  const waypoints = pubsWithLocations
-    .map(p => encodeURIComponent(`${p.location}`))
+  const orderedPubs = optimizedOrder.map(i => pubs[i]);
+  const waypoints = orderedPubs
+    .map(p => encodeURIComponent(p.location))
     .join("/");
   
   const routeUrl = `https://www.google.com/maps/dir/${STATION_WAYPOINT}/${waypoints}`;
@@ -209,45 +229,45 @@ const run = async () => {
 
   const allPubs = pages.filter((p): p is PageObjectResponse => "properties" in p);
 
-  // Always recalculate route for ALL pubs
-  logger.info("Recalculating optimal route for all pubs...");
+  // Extract pub information
+  const pubs: PubInfo[] = allPubs
+    .map((page, index) => {
+      const nameProperty = page.properties.Pub;
+      const locationProperty = page.properties.Location;
 
-  await batchAnnotate<PubData>(ai, {
-    pages: allPubs,
-    extractName: extractTitle,
-    buildPrompt,
-    parseResponse,
-    buildUpdates: (page, data) => {
-      // Force update route order and distance, only skip overview if already filled
-      const props = page.properties;
-      const updates: Record<string, unknown> = {};
+      const name = nameProperty?.type === "title" 
+        ? nameProperty.title[0]?.plain_text || ""
+        : "";
       
-      // Always update route order and distance
-      updates["Route order"] = { number: data.routeOrder };
-      updates["Distance from station (metres)"] = { number: data.distanceFromStation };
-      
-      // Only update overview if empty
-      const overviewEmpty = props.Overview?.type === "rich_text" 
-        && props.Overview.rich_text.length === 0;
-      if (overviewEmpty) {
-        updates["Overview"] = { rich_text: [{ text: { content: data.overview } }] };
-      }
-      
-      return updates;
-    },
-    updatePage: async (page, updates) =>
-      updatePage(notion, page.id, updates),
-    itemType: "pub",
-  });
+      const location = locationProperty?.type === "rich_text"
+        ? locationProperty.rich_text[0]?.plain_text || ""
+        : "";
 
-  logger.success("Pubs completion complete");
+      return {
+        id: page.id,
+        name,
+        location: location || name, // fallback to name if no specific location
+        originalIndex: index
+      };
+    })
+    .filter(p => p.name); // only include pubs with names
 
-  // Always update the route (in case pubs were added/reordered)
-  logger.info("Updating pub crawl route...");
-  const allPages = await getAllPages(DATABASE_ID, PRIVATE_INTEGRATION_TOKEN);
-  await updatePageWithRoute(
-    allPages.filter((p): p is PageObjectResponse => "properties" in p)
-  );
+  if (pubs.length === 0) {
+    logger.warn("No pubs found in database");
+    return;
+  }
+
+  logger.info(`Found ${pubs.length} pubs, optimizing route...`);
+
+  // Get optimized route from Google
+  const { optimizedOrder, distances } = await optimizeRouteWithGoogle(pubs);
+
+  // Update Notion pages with route data
+  await updatePubsWithRouteData(pubs, optimizedOrder, distances);
+
+  // Update the page with the route map
+  logger.info("Updating pub crawl route map...");
+  await updatePageWithRoute(pubs, optimizedOrder);
   
   logger.success("✓ Done! Check your Notion page for the complete route map.");
 };
