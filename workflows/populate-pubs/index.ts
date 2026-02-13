@@ -276,34 +276,27 @@ const run = async () => {
       continue;
     }
 
-    // Debug: Log the actual property structure for the first pub
-    if (pubsWithCoords.length === 0) {
-      logger.info(`DEBUG - Location property for "${name}":`, JSON.stringify(locationProperty, null, 2));
-    }
-
     // Extract coordinates from Place property
     if (locationProperty?.type === "place" && locationProperty.place) {
       const place = locationProperty.place;
       
-      if (place.latitude && place.longitude) {
+      if (place.lat && place.lon) {
         const locationName = place.name || place.address || name;
         
         pubsWithCoords.push({
           page,
           name,
           location: locationName,
-          lat: place.latitude,
-          lon: place.longitude
+          lat: place.lat,
+          lon: place.lon
         });
         
         logger.info(`  ✓ ${name}: ${locationName}`);
       } else {
         logger.warn(`  ✗ ${name}: Place property missing coordinates`);
-        logger.info(`     Place object:`, JSON.stringify(place, null, 2));
       }
     } else {
       logger.warn(`  ✗ ${name}: No Place property found`);
-      logger.info(`     Property type: ${locationProperty?.type || 'undefined'}`);
     }
   }
 
