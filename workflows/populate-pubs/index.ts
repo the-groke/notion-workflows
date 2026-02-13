@@ -14,7 +14,7 @@ import type { PageObjectResponse, BlockObjectResponse } from "@notionhq/client/b
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const PRIVATE_INTEGRATION_TOKEN = process.env.PRIVATE_INTEGRATION_TOKEN;
+const PRIVATE_INTEGRATION_TOKEN = process.env.PRIVATE_INTEGRATION_TOKEN
 const STATION_WAYPOINT = process.env.STATION_WAYPOINT;
 const LOCATION = process.env.LOCATION;
 const DATABASE_ID = process.env.PUBS_DATABASE_ID;
@@ -213,7 +213,8 @@ const updatePageWithRoute = async (route: RouteResult[]): Promise<void> => {
     .map(r => `${r.pub.lat},${r.pub.lon}`)
     .join("/");
   
-  const routeUrl = `https://www.google.com/maps/dir/${STATION_WAYPOINT}/${waypoints}`;
+  // Add travelmode=walking for pub crawl
+  const routeUrl = `https://www.google.com/maps/dir/${STATION_WAYPOINT}/${waypoints}?travelmode=walking`;
 
   // Delete old route blocks first
   await deleteExistingRouteBlocks();
