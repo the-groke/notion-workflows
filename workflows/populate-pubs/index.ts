@@ -213,8 +213,8 @@ const updatePageWithRoute = async (route: RouteResult[]): Promise<void> => {
     .map(r => `${r.pub.lat},${r.pub.lon}`)
     .join("/");
   
-  // Add travelmode=walking for pub crawl
-  const routeUrl = `https://www.google.com/maps/dir/${STATION_WAYPOINT}/${waypoints}?travelmode=walking`;
+  // Add dirflg=w for walking mode (w=walking, d=driving, r=transit, b=bicycling)
+  const routeUrl = `https://www.google.com/maps/dir/${STATION_WAYPOINT}/${waypoints}?dirflg=w`;
 
   // Delete old route blocks first
   await deleteExistingRouteBlocks();
