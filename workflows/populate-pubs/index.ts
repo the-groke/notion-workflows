@@ -208,13 +208,24 @@ const updatePageWithRoute = async (route: RouteResult[]): Promise<void> => {
     return;
   }
 
-  // Use coordinates for Google Maps waypoints to ensure accuracy
-  const waypoints = route
-    .map(r => `${r.pub.lat},${r.pub.lon}`)
-    .join("/");
+  // Use the official Google Maps URL API format
+  // First waypoint is origin, last is destination, rest are waypoints
+  const origin = `${route[0].pub.lat},${route[0].pub.lon}`;
+  const destination = route.length > 1 
+    ? `${route[route.length - 1].pub.lat},${route[route.length - 1].pub.lon}`
+    : origin;
   
-  // Build URL with walking mode (3e2 = walking)
-  const routeUrl = `https://www.google.com/maps/dir/${STATION_WAYPOINT}/${waypoints}/data=!3e2`;
+  // Middle waypoints (if any)
+  const waypoints = route.length > 2
+    ? route.slice(1, -1).map(r => `${r.pub.lat},${r.pub.lon}`).join("|")
+    : "";
+  
+  // Build URL using Google Maps URL API format
+  let routeUrl = `https://www.google.com/maps/dir/?api=1&origin=${STATION_WAYPOINT}&destination=${destination}&travelmode=walking`;
+  
+  if (waypoints) {
+    routeUrl += `&waypoints=${waypoints}`;
+  }
 
   // Delete old route blocks first
   await deleteExistingRouteBlocks();
