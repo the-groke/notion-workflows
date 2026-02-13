@@ -208,8 +208,9 @@ const updatePageWithRoute = async (route: RouteResult[]): Promise<void> => {
     return;
   }
 
+  // Use coordinates for Google Maps waypoints to ensure accuracy
   const waypoints = route
-    .map(r => encodeURIComponent(r.pub.location))
+    .map(r => `${r.pub.lat},${r.pub.lon}`)
     .join("/");
   
   const routeUrl = `https://www.google.com/maps/dir/${STATION_WAYPOINT}/${waypoints}`;
