@@ -14,7 +14,7 @@ import type { PageObjectResponse, BlockObjectResponse } from "@notionhq/client/b
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const PRIVATE_INTEGRATION_TOKEN = process.env.PRIVATE_INTEGRATION_TOKEN;
+const PRIVATE_INTEGRATION_TOKEN = process.env.PRIVATE_INTEGRATION_TOKEN
 const STATION_WAYPOINT = process.env.STATION_WAYPOINT;
 const LOCATION = process.env.LOCATION;
 const DATABASE_ID = process.env.PUBS_DATABASE_ID;
@@ -70,33 +70,6 @@ const parseStationCoordinates = async (): Promise<{ lat: number; lon: number }> 
   }
   
   return { lat: parseFloat(results[0].lat), lon: parseFloat(results[0].lon) };
-};
-
-// Geocode a pub location (address or name)
-const geocodeLocation = async (location: string): Promise<{ lat: number; lon: number } | null> => {
-  try {
-    const query = `${location}, ${LOCATION}`;
-    logger.info(`Geocoding: ${query}`);
-    
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`,
-      { headers: { 'User-Agent': 'PubCrawlOptimizer/1.0' } }
-    );
-    
-    const results = await response.json();
-    if (!results || results.length === 0) {
-      logger.warn(`Could not geocode: ${location}`);
-      return null;
-    }
-    
-    // Add a small delay to respect Nominatim's rate limits (max 1 request per second)
-    await new Promise(resolve => setTimeout(resolve, 1100));
-    
-    return { lat: parseFloat(results[0].lat), lon: parseFloat(results[0].lon) };
-  } catch (error) {
-    logger.error(`Geocoding error for ${location}:`, error instanceof Error ? error : new Error(String(error)));
-    return null;
-  }
 };
 
 // Calculate distance between two coordinates using Haversine formula
@@ -286,8 +259,8 @@ const run = async () => {
   const stationCoords = await parseStationCoordinates();
   logger.success(`Station coordinates: ${stationCoords.lat}, ${stationCoords.lon}`);
 
-  // Geocode all pubs
-  logger.info("Geocoding pub locations...");
+  // Extract coordinates from Place properties
+  logger.info("Extracting pub locations from Notion Place properties...");
   const pubsWithCoords: PubWithCoords[] = [];
   
   for (const page of allPubs) {
@@ -298,32 +271,40 @@ const run = async () => {
       ? nameProperty.title[0]?.plain_text || ""
       : "";
     
-    const location = locationProperty?.type === "rich_text"
-      ? locationProperty.rich_text[0]?.plain_text || ""
-      : "";
-    
     if (!name) {
       logger.warn("Skipping pub with no name");
       continue;
     }
 
-    const searchLocation = location || name;
-    const coords = await geocodeLocation(searchLocation);
-    
-    if (coords) {
-      pubsWithCoords.push({
-        page,
-        name,
-        location: searchLocation,
-        ...coords
-      });
+    // Extract coordinates from Place property
+    if (locationProperty?.type === "place" && locationProperty.place) {
+      const place = locationProperty.place;
+      
+      if (place.latitude && place.longitude) {
+        const locationName = place.name || place.address || name;
+        
+        pubsWithCoords.push({
+          page,
+          name,
+          location: locationName,
+          lat: place.latitude,
+          lon: place.longitude
+        });
+        
+        logger.info(`  ✓ ${name}: ${locationName}`);
+      } else {
+        logger.warn(`  ✗ ${name}: Place property missing coordinates`);
+      }
+    } else {
+      logger.warn(`  ✗ ${name}: No Place property found`);
     }
   }
 
-  logger.success(`Successfully geocoded ${pubsWithCoords.length}/${allPubs.length} pubs`);
+  logger.success(`Successfully extracted ${pubsWithCoords.length}/${allPubs.length} pub locations`);
 
   if (pubsWithCoords.length === 0) {
-    logger.error("No pubs could be geocoded. Cannot calculate route.");
+    logger.error("No pubs with Place properties containing coordinates. Cannot calculate route.");
+    logger.info("Make sure your pubs have a 'Location' property of type 'Place' with coordinates set.");
     return;
   }
 
