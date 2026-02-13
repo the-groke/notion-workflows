@@ -14,7 +14,7 @@ import type { PageObjectResponse, BlockObjectResponse } from "@notionhq/client/b
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const PRIVATE_INTEGRATION_TOKEN = process.env.PRIVATE_INTEGRATION_TOKEN
+const PRIVATE_INTEGRATION_TOKEN = process.env.PRIVATE_INTEGRATION_TOKEN;
 const STATION_WAYPOINT = process.env.STATION_WAYPOINT;
 const LOCATION = process.env.LOCATION;
 const DATABASE_ID = process.env.PUBS_DATABASE_ID;
