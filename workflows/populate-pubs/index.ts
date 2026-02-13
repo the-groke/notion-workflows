@@ -19,7 +19,6 @@ const STATION_WAYPOINT = process.env.STATION_WAYPOINT;
 const LOCATION = process.env.LOCATION;
 const DATABASE_ID = process.env.PUBS_DATABASE_ID;
 const PAGE_ID = process.env.PUBS_PAGE_ID;
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
 if (!PRIVATE_INTEGRATION_TOKEN) {
   logger.error("PRIVATE_INTEGRATION_TOKEN is not defined");
@@ -41,36 +40,156 @@ if (!STATION_WAYPOINT) {
   process.exit(1);
 }
 
-if (!LOCATION) {
+if (!process.env.LOCATION) {
   logger.error("LOCATION is not defined");
-  process.exit(1);
-}
-
-if (!GOOGLE_MAPS_API_KEY) {
-  logger.error("GOOGLE_MAPS_API_KEY is not defined");
   process.exit(1);
 }
 
 const notion = createNotionClient(PRIVATE_INTEGRATION_TOKEN);
 
-interface PubInfo {
-  id: string;
+// Parse station coordinates from STATION_WAYPOINT
+// Expected format: "lat,lng" or a location name we'll need to geocode
+const parseStationCoordinates = async (): Promise<{ lat: number; lon: number }> => {
+  // Try parsing as coordinates first
+  const coords = STATION_WAYPOINT.split(',').map(s => parseFloat(s.trim()));
+  if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+    return { lat: coords[0], lon: coords[1] };
+  }
+  
+  // If not coordinates, we need to geocode the station name
+  // Using Nominatim (OpenStreetMap's free geocoding service)
+  logger.info(`Geocoding station: ${STATION_WAYPOINT}`);
+  const response = await fetch(
+    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(STATION_WAYPOINT)}&format=json&limit=1`,
+    { headers: { 'User-Agent': 'PubCrawlOptimizer/1.0' } }
+  );
+  
+  const results = await response.json();
+  if (!results || results.length === 0) {
+    throw new Error(`Could not geocode station: ${STATION_WAYPOINT}`);
+  }
+  
+  return { lat: parseFloat(results[0].lat), lon: parseFloat(results[0].lon) };
+};
+
+// Geocode a pub location (address or name)
+const geocodeLocation = async (location: string): Promise<{ lat: number; lon: number } | null> => {
+  try {
+    const query = `${location}, ${LOCATION}`;
+    logger.info(`Geocoding: ${query}`);
+    
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`,
+      { headers: { 'User-Agent': 'PubCrawlOptimizer/1.0' } }
+    );
+    
+    const results = await response.json();
+    if (!results || results.length === 0) {
+      logger.warn(`Could not geocode: ${location}`);
+      return null;
+    }
+    
+    // Add a small delay to respect Nominatim's rate limits (max 1 request per second)
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    
+    return { lat: parseFloat(results[0].lat), lon: parseFloat(results[0].lon) };
+  } catch (error) {
+    logger.error(`Geocoding error for ${location}:`, error instanceof Error ? error : new Error(String(error)));
+    return null;
+  }
+};
+
+// Calculate distance between two coordinates using Haversine formula
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const R = 6371e3; // Earth's radius in metres
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) *
+    Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c; // Distance in metres
+};
+
+interface PubWithCoords {
+  page: PageObjectResponse;
   name: string;
   location: string;
-  originalIndex: number;
+  lat: number;
+  lon: number;
 }
 
-interface GoogleMapsDirectionsResponse {
-  routes: Array<{
-    waypoint_order: number[];
-    legs: Array<{
-      distance: {
-        value: number; // in metres
-      };
-    }>;
-  }>;
-  status: string;
+interface RouteResult {
+  pub: PubWithCoords;
+  distanceFromStation: number;
+  routeOrder: number;
 }
+
+// Nearest Neighbor algorithm to find optimal route
+const optimizeRoute = (
+  stationCoords: { lat: number; lon: number },
+  pubs: PubWithCoords[]
+): RouteResult[] => {
+  const unvisited = [...pubs];
+  const route: RouteResult[] = [];
+  let current = stationCoords;
+  let order = 1;
+
+  logger.info("Optimizing route using Nearest Neighbor algorithm...");
+
+  while (unvisited.length > 0) {
+    // Find nearest unvisited pub
+    let nearestIdx = 0;
+    let nearestDist = Infinity;
+
+    for (let i = 0; i < unvisited.length; i++) {
+      const dist = calculateDistance(
+        current.lat,
+        current.lon,
+        unvisited[i].lat,
+        unvisited[i].lon
+      );
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearestIdx = i;
+      }
+    }
+
+    const nearest = unvisited.splice(nearestIdx, 1)[0];
+    
+    // Calculate distance from station (not from previous pub)
+    const distanceFromStation = calculateDistance(
+      stationCoords.lat,
+      stationCoords.lon,
+      nearest.lat,
+      nearest.lon
+    );
+    
+    route.push({
+      pub: nearest,
+      distanceFromStation: Math.round(distanceFromStation),
+      routeOrder: order++
+    });
+    
+    logger.info(`  ${order - 1}. ${nearest.name} (${Math.round(nearestDist)}m from previous)`);
+    
+    current = { lat: nearest.lat, lon: nearest.lon };
+  }
+
+  const totalDistance = route.reduce((sum, r, i) => {
+    if (i === 0) return sum;
+    const prev = route[i - 1];
+    return sum + calculateDistance(prev.pub.lat, prev.pub.lon, r.pub.lat, r.pub.lon);
+  }, calculateDistance(stationCoords.lat, stationCoords.lon, route[0].pub.lat, route[0].pub.lon));
+
+  logger.success(`Total crawl distance: ${Math.round(totalDistance)}m`);
+
+  return route;
+};
 
 // Delete existing route blocks from the page
 const deleteExistingRouteBlocks = async (): Promise<void> => {
@@ -109,86 +228,15 @@ const deleteExistingRouteBlocks = async (): Promise<void> => {
   }
 };
 
-// Optimize route using Google Maps Directions API
-const optimizeRouteWithGoogle = async (pubs: PubInfo[]): Promise<{
-  optimizedOrder: number[];
-  distances: number[];
-}> => {
-  if (pubs.length === 0) {
-    return { optimizedOrder: [], distances: [] };
-  }
-
-  // Google Maps API has a limit of 25 waypoints
-  if (pubs.length > 25) {
-    logger.warn(`Too many pubs (${pubs.length}). Google Maps API supports max 25 waypoints. Using first 25.`);
-    pubs = pubs.slice(0, 25);
-  }
-
-  const waypoints = pubs.map(p => p.location).join('|');
-  
-  const url = new URL('https://maps.googleapis.com/maps/api/directions/json');
-  url.searchParams.set('origin', STATION_WAYPOINT);
-  url.searchParams.set('destination', STATION_WAYPOINT); // circular route back to station
-  url.searchParams.set('waypoints', `optimize:true|${waypoints}`);
-  url.searchParams.set('mode', 'walking');
-  url.searchParams.set('key', GOOGLE_MAPS_API_KEY!);
-
-  logger.info("Calling Google Maps Directions API...");
-  
-  const response = await fetch(url.toString());
-  const data: GoogleMapsDirectionsResponse = await response.json();
-
-  if (data.status !== 'OK') {
-    throw new Error(`Google Maps API error: ${data.status}`);
-  }
-
-  const route = data.routes[0];
-  const optimizedOrder = route.waypoint_order;
-  
-  // Extract distances (first leg is from station to first pub)
-  const distances = route.legs.map(leg => leg.distance.value);
-
-  logger.success(`Route optimized! Order: ${optimizedOrder.map(i => pubs[i].name).join(' → ')}`);
-
-  return { optimizedOrder, distances };
-};
-
-// Update Notion pages with route order and distances
-const updatePubsWithRouteData = async (
-  pubs: PubInfo[],
-  optimizedOrder: number[],
-  distances: number[]
-): Promise<void> => {
-  logger.info("Updating pub pages with route data...");
-
-  for (let routeOrder = 0; routeOrder < optimizedOrder.length; routeOrder++) {
-    const pubIndex = optimizedOrder[routeOrder];
-    const pub = pubs[pubIndex];
-    const distanceFromStation = distances[routeOrder]; // distance from previous waypoint
-
-    const updates = {
-      "Route order": { number: routeOrder + 1 }, // 1-indexed for humans
-      "Distance from station (metres)": { number: distanceFromStation }
-    };
-
-    await updatePage(notion, pub.id, updates);
-    
-    logger.info(`Updated ${pub.name}: order=${routeOrder + 1}, distance=${distanceFromStation}m`);
-  }
-
-  logger.success("All pubs updated with route data");
-};
-
 // Generate Google Maps route URL and update the page
-const updatePageWithRoute = async (pubs: PubInfo[], optimizedOrder: number[]): Promise<void> => {
-  if (pubs.length === 0) {
-    logger.warn("No pubs to create route");
+const updatePageWithRoute = async (route: RouteResult[]): Promise<void> => {
+  if (route.length === 0) {
+    logger.warn("No pubs in route");
     return;
   }
 
-  const orderedPubs = optimizedOrder.map(i => pubs[i]);
-  const waypoints = orderedPubs
-    .map(p => encodeURIComponent(p.location))
+  const waypoints = route
+    .map(r => encodeURIComponent(r.pub.location))
     .join("/");
   
   const routeUrl = `https://www.google.com/maps/dir/${STATION_WAYPOINT}/${waypoints}`;
@@ -229,45 +277,74 @@ const run = async () => {
 
   const allPubs = pages.filter((p): p is PageObjectResponse => "properties" in p);
 
-  // Extract pub information
-  const pubs: PubInfo[] = allPubs
-    .map((page, index) => {
-      const nameProperty = page.properties.Pub;
-      const locationProperty = page.properties.Location;
-
-      const name = nameProperty?.type === "title" 
-        ? nameProperty.title[0]?.plain_text || ""
-        : "";
-      
-      const location = locationProperty?.type === "rich_text"
-        ? locationProperty.rich_text[0]?.plain_text || ""
-        : "";
-
-      return {
-        id: page.id,
-        name,
-        location: location || name, // fallback to name if no specific location
-        originalIndex: index
-      };
-    })
-    .filter(p => p.name); // only include pubs with names
-
-  if (pubs.length === 0) {
+  if (allPubs.length === 0) {
     logger.warn("No pubs found in database");
     return;
   }
 
-  logger.info(`Found ${pubs.length} pubs, optimizing route...`);
+  // Get station coordinates
+  const stationCoords = await parseStationCoordinates();
+  logger.success(`Station coordinates: ${stationCoords.lat}, ${stationCoords.lon}`);
 
-  // Get optimized route from Google
-  const { optimizedOrder, distances } = await optimizeRouteWithGoogle(pubs);
+  // Geocode all pubs
+  logger.info("Geocoding pub locations...");
+  const pubsWithCoords: PubWithCoords[] = [];
+  
+  for (const page of allPubs) {
+    const nameProperty = page.properties.Pub;
+    const locationProperty = page.properties.Location;
+    
+    const name = nameProperty?.type === "title" 
+      ? nameProperty.title[0]?.plain_text || ""
+      : "";
+    
+    const location = locationProperty?.type === "rich_text"
+      ? locationProperty.rich_text[0]?.plain_text || ""
+      : "";
+    
+    if (!name) {
+      logger.warn("Skipping pub with no name");
+      continue;
+    }
 
-  // Update Notion pages with route data
-  await updatePubsWithRouteData(pubs, optimizedOrder, distances);
+    const searchLocation = location || name;
+    const coords = await geocodeLocation(searchLocation);
+    
+    if (coords) {
+      pubsWithCoords.push({
+        page,
+        name,
+        location: searchLocation,
+        ...coords
+      });
+    }
+  }
 
-  // Update the page with the route map
+  logger.success(`Successfully geocoded ${pubsWithCoords.length}/${allPubs.length} pubs`);
+
+  if (pubsWithCoords.length === 0) {
+    logger.error("No pubs could be geocoded. Cannot calculate route.");
+    return;
+  }
+
+  // Calculate optimal route
+  const route = optimizeRoute(stationCoords, pubsWithCoords);
+
+  // Update Notion pages with route order and distance
+  logger.info("Updating Notion pages with route information...");
+  for (const { pub, distanceFromStation, routeOrder } of route) {
+    await updatePage(notion, pub.page.id, {
+      "Route order": { number: routeOrder },
+      "Distance from station (metres)": { number: distanceFromStation }
+    });
+    logger.info(`  Updated ${pub.name}: order ${routeOrder}, ${distanceFromStation}m from station`);
+  }
+
+  logger.success("All pub pages updated");
+
+  // Update the route map on the page
   logger.info("Updating pub crawl route map...");
-  await updatePageWithRoute(pubs, optimizedOrder);
+  await updatePageWithRoute(route);
   
   logger.success("✓ Done! Check your Notion page for the complete route map.");
 };
