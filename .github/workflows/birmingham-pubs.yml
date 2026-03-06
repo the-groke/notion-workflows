@@ -1,0 +1,31 @@
+name: Populate Birmingham Pubs Database
+
+on:
+  schedule:
+    - cron: '35 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  populate-birmingham-pubs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Populate Birmingham pubs data
+        run: npx tsx workflows/populate-pubs/index.ts
+        env:
+          PRIVATE_INTEGRATION_TOKEN: ${{ secrets.PRIVATE_INTEGRATION_TOKEN }}
+          PUBS_DATABASE_ID: ${{ secrets.BIRMINGHAM_PUBS_DATABASE_ID }}
+          PUBS_PAGE_ID: ${{ secrets.BIRMINGHAM_PUBS_PAGE_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          STATION_WAYPOINT: ${{ secrets.BIRMINGHAM_STATION_WAYPOINT }}
+          LOCATION: 'Birmingham'
