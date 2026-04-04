@@ -8,7 +8,7 @@ import {
 import { logger } from "utils/logger";
 import { createAIClient, type AIClient } from "utils/ai";
 // Types
-import type { 
+import type {
   PageObjectResponse,
   BlockObjectResponse,
 } from "@notionhq/client/build/src/api-endpoints";
@@ -73,8 +73,10 @@ interface HelperItem {
   addToTurkishList: boolean;
   addToAsianList: boolean;
   delete: boolean;
+  status: "New" | "Processed" | "Staple";
   mealId?: string;
   createdTime: string;
+  lastProcessed?: string;
 }
 
 type ShoppingListType = 'grocery' | 'turkish' | 'asian';
@@ -83,7 +85,7 @@ type ShoppingListType = 'grocery' | 'turkish' | 'asian';
 const getUpcomingMeals = async (): Promise<Meal[]> => {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  
+
   const sevenDaysFromNow = new Date(today);
   sevenDaysFromNow.setDate(today.getDate() + 7);
 
@@ -204,9 +206,29 @@ const getUpcomingMeals = async (): Promise<Meal[]> => {
   return meals;
 };
 
-// Get existing helper items
+// Get existing helper items (including all statuses, no archiving)
 const getHelperItems = async (): Promise<HelperItem[]> => {
-  const pages = await getAllPages(SHOPPING_HELPER_DATABASE_ID, NOTION_TOKEN);
+  // Fetch all non-archived pages (API defaults to archived=false)
+  const response = await fetch(
+    `https://api.notion.com/v1/databases/${SHOPPING_HELPER_DATABASE_ID}/query`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${NOTION_TOKEN}`,
+        "Notion-Version": "2022-06-28",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(`Failed to query helper database: ${error.message}`);
+  }
+
+  const data = await response.json();
+  const pages = data.results;
 
   return pages
     .filter((page): page is PageObjectResponse => "properties" in page)
@@ -216,7 +238,9 @@ const getHelperItems = async (): Promise<HelperItem[]> => {
       const turkishCheckboxProperty = page.properties["Add to Turkish supermarket shopping list"];
       const asianCheckboxProperty = page.properties["Add to Asian supermarket shopping list"];
       const deleteProperty = page.properties.Delete;
+      const statusProperty = page.properties.Status;
       const mealProperty = page.properties.Meal;
+      const lastProcessedProperty = page.properties["Last processed"];
 
       const item = itemProperty?.type === "title"
         ? itemProperty.title[0]?.plain_text || ""
@@ -238,97 +262,139 @@ const getHelperItems = async (): Promise<HelperItem[]> => {
         ? deleteProperty.checkbox
         : false;
 
+      const status = statusProperty?.type === "select"
+        ? (statusProperty.select?.name as "New" | "Processed" | "Staple" || "New")
+        : "New";
+
       const mealId = mealProperty?.type === "relation"
         ? mealProperty.relation[0]?.id
         : undefined;
 
+      const lastProcessed = lastProcessedProperty?.type === "date"
+        ? lastProcessedProperty.date?.start
+        : undefined;
+
       const createdTime = page.created_time;
 
-      return { 
-        id: page.id, 
-        item, 
-        addToShoppingList, 
+      return {
+        id: page.id,
+        item,
+        addToShoppingList,
         addToTurkishList,
         addToAsianList,
-        delete: deleteFlag, 
-        mealId, 
-        createdTime 
+        delete: deleteFlag,
+
+        status,
+        mealId,
+        createdTime,
+        lastProcessed
       };
     });
 };
 
-// Populate helper database with upcoming meal ingredients
+// Populate helper database with upcoming meal ingredients using status-based logic
 const populateHelperDatabase = async (
   meals: Meal[],
   existingItems: HelperItem[]
 ): Promise<void> => {
-  const currentMealIds = new Set(meals.map((m) => m.id));
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-  // Create a set of all ingredients needed for upcoming meals
-  const upcomingIngredients = new Set<string>();
-  for (const meal of meals) {
-    for (const ingredient of meal.ingredients) {
-      upcomingIngredients.add(ingredient.toLowerCase());
-    }
-  }
-
-  // Track which items we've archived
-  const archivedItemIds = new Set<string>();
-
-  // Delete items that meet any of these criteria:
-  // 1. Related to meals no longer in the next 7 days
-  // 2. Older than 7 days AND not checked for any shopping list
-  // 3. Marked as "Delete" AND older than 7 days AND NOT needed for upcoming meals
+  // Build a map of existing ingredients by normalized name for quick lookup
+  const existingItemsMap = new Map<string, HelperItem>();
   for (const item of existingItems) {
-    const itemCreatedDate = new Date(item.createdTime);
-    const isOlderThan7Days = itemCreatedDate < sevenDaysAgo;
-    const isCheckedForAnyList = item.addToShoppingList || item.addToTurkishList || item.addToAsianList;
-    const isStillNeeded = upcomingIngredients.has(item.item.toLowerCase());
-    
-    const shouldDelete = 
-      (item.mealId && !currentMealIds.has(item.mealId)) ||
-      (isOlderThan7Days && !isCheckedForAnyList) ||
-      (item.delete && isOlderThan7Days && !isStillNeeded);  // <-- KEY CHANGE
-
-    if (shouldDelete) {
-      await notion.pages.update({
-        page_id: item.id,
-        archived: true,
-      });
-      archivedItemIds.add(item.id);
-      logger.info("Removed item", { 
-        item: item.item,
-        reason: item.delete ? "marked for deletion (>7 days, not needed)" : 
-                isOlderThan7Days ? "older than 7 days" : 
-                "meal no longer upcoming"
-      });
-    }
+    existingItemsMap.set(item.item.toLowerCase(), item);
   }
 
-  // Create a set of existing item names (excluding archived ones)
-  const existingItemNames = new Set(
-    existingItems
-      .filter(item => !archivedItemIds.has(item.id))
-      .map((i) => i.item.toLowerCase())
-  );
+  // Process each ingredient from upcoming meals
+  const ingredientsToAdd: Array<{ meal: Meal; ingredient: string }> = [];
+  const ingredientsToUpdate: Array<{ item: HelperItem; meal: Meal }> = [];
+  const ingredientsProcessed = new Set<string>();
 
-  // Deduplicate ingredients before adding
-  const ingredientsToAdd = new Map<string, { meal: Meal; ingredient: string }>();
-  
   for (const meal of meals) {
     for (const ingredient of meal.ingredients) {
       const normalizedIngredient = ingredient.toLowerCase();
-      // Only add if it doesn't exist at all (even if marked Delete, don't re-add)
-      if (!existingItemNames.has(normalizedIngredient) && !ingredientsToAdd.has(normalizedIngredient)) {
-        ingredientsToAdd.set(normalizedIngredient, { meal, ingredient });
+
+      // Skip if we've already processed this ingredient in this batch
+      if (ingredientsProcessed.has(normalizedIngredient)) {
+        continue;
+      }
+      ingredientsProcessed.add(normalizedIngredient);
+
+      const existingItem = existingItemsMap.get(normalizedIngredient);
+
+      if (!existingItem) {
+        // New ingredient - add it
+        ingredientsToAdd.push({ meal, ingredient });
+      } else if (existingItem.status === "Staple") {
+        // Staple - skip entirely, don't update meal relation
+        logger.info("Skipping staple ingredient", { ingredient });
+      } else if (existingItem.status === "Processed") {
+        // Check if it should be reset to New based on last processed date
+        const lastProcessedDate = existingItem.lastProcessed
+          ? new Date(existingItem.lastProcessed)
+          : new Date(existingItem.createdTime);
+
+        const isOlderThan7Days = lastProcessedDate < sevenDaysAgo;
+
+        if (isOlderThan7Days) {
+          // Reset to New and update meal relation
+          await notion.pages.update({
+            page_id: existingItem.id,
+            properties: {
+              Status: {
+                select: { name: "New" },
+              },
+              Meal: {
+                relation: [{ id: meal.id }],
+              },
+            },
+          });
+          logger.info("Reset processed ingredient to New (>7 days old)", {
+            ingredient,
+            meal: meal.name,
+            lastProcessed: lastProcessedDate.toISOString()
+          });
+        } else {
+          // Keep as Processed, just update meal relation
+          await notion.pages.update({
+            page_id: existingItem.id,
+            properties: {
+              Meal: {
+                relation: [{ id: meal.id }],
+              },
+            },
+          });
+          logger.info("Kept ingredient as Processed (within 7 days)", {
+            ingredient,
+            meal: meal.name
+          });
+        }
+      } else {
+        // Status is New - just update the meal relation to latest meal
+        ingredientsToUpdate.push({ item: existingItem, meal });
       }
     }
   }
 
+  // Update meal relations for existing New items
+  for (const { item, meal } of ingredientsToUpdate) {
+    await notion.pages.update({
+      page_id: item.id,
+      properties: {
+        Meal: {
+          relation: [{ id: meal.id }],
+        },
+      },
+    });
+    logger.info("Updated meal relation for existing ingredient", {
+      ingredient: item.item,
+      meal: meal.name
+    });
+  }
+
   // Add new ingredients
-  for (const [_, { meal, ingredient }] of ingredientsToAdd) {
+  for (const { meal, ingredient } of ingredientsToAdd) {
     await notion.pages.create({
       parent: { database_id: SHOPPING_HELPER_DATABASE_ID },
       properties: {
@@ -347,16 +413,22 @@ const populateHelperDatabase = async (
         Delete: {
           checkbox: false,
         },
+        Status: {
+          select: { name: "New" },
+        },
         Meal: {
           relation: [{ id: meal.id }],
         },
       },
     });
-    logger.info("Added ingredient to helper", { ingredient, meal: meal.name });
+    logger.info("Added new ingredient", { ingredient, meal: meal.name });
   }
 
-  if (ingredientsToAdd.size > 0) {
-    logger.success("Added new ingredients", { count: ingredientsToAdd.size });
+  if (ingredientsToAdd.length > 0) {
+    logger.success("Added new ingredients", { count: ingredientsToAdd.length });
+  }
+  if (ingredientsToUpdate.length > 0) {
+    logger.success("Updated existing ingredients", { count: ingredientsToUpdate.length });
   }
 };
 
@@ -475,7 +547,7 @@ const addItemsToShoppingList = async (
     // Find the next block after the heading that's NOT a to_do (or end of list)
     // We want to insert before the next heading or other non-todo block
     let insertBeforeBlockId: string | null = null;
-    
+
     for (let i = headingIndex + 1; i < blocks.length; i++) {
       const block = blocks[i];
       if ("type" in block && block.type !== "to_do") {
@@ -522,7 +594,7 @@ const processShoppingList = async (
   listType: ShoppingListType,
   pageId: string
 ): Promise<number> => {
-  const listName = listType === 'grocery' ? 'grocery' : 
+  const listName = listType === 'grocery' ? 'grocery' :
                    listType === 'turkish' ? 'Turkish' : 'Asian';
 
   if (items.length === 0) {
@@ -534,7 +606,7 @@ const processShoppingList = async (
 
   // Get existing shopping list items to avoid duplicates
   const existingShoppingListItems = await getExistingShoppingListItems(pageId);
-  
+
   // Filter out items that already exist on the shopping list
   const newItemsToAdd = items.filter(
     item => !existingShoppingListItems.has(item.item.toLowerCase())
@@ -545,7 +617,7 @@ const processShoppingList = async (
     return 0;
   }
 
-  logger.info(`Items to add to ${listName} shopping list`, { 
+  logger.info(`Items to add to ${listName} shopping list`, {
     total: items.length,
     new: newItemsToAdd.length,
     duplicate: items.length - newItemsToAdd.length
@@ -573,53 +645,83 @@ const run = async () => {
   const upcomingMeals = await getUpcomingMeals();
   logger.info("Found upcoming meals", { count: upcomingMeals.length });
 
-  logger.info("Updating shopping helper database...");
+  logger.info("Updating ingredients database...");
   const existingHelperItems = await getHelperItems();
   await populateHelperDatabase(upcomingMeals, existingHelperItems);
 
-  // Step 2: Process items for each shopping list type
-  const groceryItems = existingHelperItems.filter((item) => item.addToShoppingList);
-  const turkishItems = existingHelperItems.filter((item) => item.addToTurkishList);
-  const asianItems = existingHelperItems.filter((item) => item.addToAsianList);
+  // Step 2: Re-fetch items after populate to get updated state
+  const updatedHelperItems = await getHelperItems();
+
+  // Step 3: Process items for each shopping list type
+  const groceryItems = updatedHelperItems.filter((item) => item.addToShoppingList);
+  const turkishItems = updatedHelperItems.filter((item) => item.addToTurkishList);
+  const asianItems = updatedHelperItems.filter((item) => item.addToAsianList);
 
   let totalAdded = 0;
 
   // Process grocery list
   totalAdded += await processShoppingList(
-    groceryItems, 
-    'grocery', 
+    groceryItems,
+    'grocery',
     GROCERY_SHOPPING_LIST_PAGE_ID
   );
 
   // Process Turkish supermarket list
   totalAdded += await processShoppingList(
-    turkishItems, 
-    'turkish', 
+    turkishItems,
+    'turkish',
     TURKISH_SUPERMARKET_LIST_PAGE_ID
   );
 
   // Process Asian supermarket list
   totalAdded += await processShoppingList(
-    asianItems, 
-    'asian', 
+    asianItems,
+    'asian',
     ASIAN_SUPERMARKET_LIST_PAGE_ID
   );
 
-  // Delete ALL checked items from helper database (from any list)
-  const allCheckedItems = existingHelperItems.filter(
-    (item) => item.addToShoppingList || item.addToTurkishList || item.addToAsianList
-  );
+  // Step 4: Process status updates based on user actions (no archiving)
+  const now = new Date().toISOString();
+  let processedCount = 0;
+  let stapleCount = 0;
 
-  for (const item of allCheckedItems) {
-    await notion.pages.update({
-      page_id: item.id,
-      archived: true,
-    });
+  for (const item of updatedHelperItems) {
+    const updates: any = {};
+    let shouldUpdate = false;
+
+    // Handle "Delete" checkbox
+    if (item.delete) {
+      updates["Status"] = { select: { name: "Processed" } };
+      updates["Delete"] = { checkbox: false };
+      updates["Last processed"] = { date: { start: now } };
+      shouldUpdate = true;
+      processedCount++;
+      logger.info("Marked ingredient as processed (Delete)", { ingredient: item.item });
+    }
+    // Handle shopping list checkboxes
+    else if (item.addToShoppingList || item.addToTurkishList || item.addToAsianList) {
+      updates["Status"] = { select: { name: "Processed" } };
+      updates["Add to shopping list"] = { checkbox: false };
+      updates["Add to Turkish supermarket shopping list"] = { checkbox: false };
+      updates["Add to Asian supermarket shopping list"] = { checkbox: false };
+      updates["Last processed"] = { date: { start: now } };
+      shouldUpdate = true;
+      processedCount++;
+      logger.info("Marked ingredient as processed (added to list)", { ingredient: item.item });
+    }
+
+    if (shouldUpdate) {
+      await notion.pages.update({
+        page_id: item.id,
+        properties: updates,
+      });
+    }
   }
 
-  logger.success("Shopping helper workflow complete", {
+  logger.success("Ingredients database workflow complete", {
     totalAdded,
-    itemsProcessed: allCheckedItems.length,
+    processed: processedCount,
+    staples: stapleCount,
   });
 };
 
