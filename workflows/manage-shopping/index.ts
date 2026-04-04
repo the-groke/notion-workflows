@@ -2,7 +2,6 @@ import 'dotenv/config';
 // Utils
 import {
   createNotionClient,
-  getAllPages,
   getAllBlocks,
 } from "utils/notion";
 import { logger } from "utils/logger";
@@ -443,17 +442,17 @@ const populateHelperDatabase = async (
   }
 };
 
-// Get existing shopping list headings
+// Get existing shopping list headings (now toggle blocks)
 const getShoppingListHeadings = async (pageId: string): Promise<string[]> => {
   const blocks = await getAllBlocks(notion, pageId);
   const headings: string[] = [];
 
   for (const block of blocks) {
-    if ("type" in block && block.type === "heading_2" && "heading_2" in block) {
-      const heading = (block as BlockObjectResponse & { type: "heading_2" }).heading_2;
-      const headingText = heading.rich_text?.[0];
-      if (headingText && "plain_text" in headingText) {
-        headings.push(headingText.plain_text);
+    if ("type" in block && block.type === "toggle" && "toggle" in block) {
+      const toggle = (block as BlockObjectResponse & { type: "toggle" }).toggle;
+      const toggleText = toggle.rich_text?.[0];
+      if (toggleText && "plain_text" in toggleText) {
+        headings.push(toggleText.plain_text);
       }
     }
   }
@@ -461,17 +460,25 @@ const getShoppingListHeadings = async (pageId: string): Promise<string[]> => {
   return headings;
 };
 
-// Get existing shopping list items (all unchecked to-dos across all headings)
+// Get existing shopping list items (all unchecked to-dos inside toggle blocks)
 const getExistingShoppingListItems = async (pageId: string): Promise<Set<string>> => {
   const blocks = await getAllBlocks(notion, pageId);
   const existingItems = new Set<string>();
 
+  // For each toggle block, get its children (to_dos)
   for (const block of blocks) {
-    if ("type" in block && block.type === "to_do" && "to_do" in block) {
-      const todo = (block as BlockObjectResponse & { type: "to_do" }).to_do;
-      const itemText = todo.rich_text?.[0];
-      if (itemText && "plain_text" in itemText && !todo.checked) {
-        existingItems.add(itemText.plain_text.toLowerCase());
+    if ("type" in block && block.type === "toggle" && "has_children" in block && block.has_children) {
+      // Get children of this toggle block
+      const children = await getAllBlocks(notion, block.id);
+
+      for (const child of children) {
+        if ("type" in child && child.type === "to_do" && "to_do" in child) {
+          const todo = (child as BlockObjectResponse & { type: "to_do" }).to_do;
+          const itemText = todo.rich_text?.[0];
+          if (itemText && "plain_text" in itemText && !todo.checked) {
+            existingItems.add(itemText.plain_text.toLowerCase());
+          }
+        }
       }
     }
   }
@@ -525,7 +532,7 @@ Respond with ONLY valid JSON (no markdown):
   return parsed.categorized as Record<string, string[]>;
 };
 
-// Add items to shopping list under appropriate headings
+// Add items to shopping list under appropriate toggle blocks
 const addItemsToShoppingList = async (
   categorized: Record<string, string[]>,
   pageId: string
@@ -533,38 +540,23 @@ const addItemsToShoppingList = async (
   const blocks = await getAllBlocks(notion, pageId);
 
   for (const [heading, items] of Object.entries(categorized)) {
-    // Find the heading block
-    let headingBlockId: string | null = null;
-    let headingIndex = -1;
+    // Find the toggle block with matching text
+    let toggleBlockId: string | null = null;
 
-    for (let i = 0; i < blocks.length; i++) {
-      const block = blocks[i];
-      if ("type" in block && block.type === "heading_2" && "heading_2" in block) {
-        const h = (block as BlockObjectResponse & { type: "heading_2" }).heading_2;
-        const headingText = h.rich_text?.[0];
-        if (headingText && "plain_text" in headingText && headingText.plain_text === heading) {
-          headingBlockId = block.id;
-          headingIndex = i;
+    for (const block of blocks) {
+      if ("type" in block && block.type === "toggle" && "toggle" in block) {
+        const toggle = (block as BlockObjectResponse & { type: "toggle" }).toggle;
+        const toggleText = toggle.rich_text?.[0];
+        if (toggleText && "plain_text" in toggleText && toggleText.plain_text === heading) {
+          toggleBlockId = block.id;
           break;
         }
       }
     }
 
-    if (!headingBlockId) {
-      logger.warn("Heading not found, skipping items", { heading, items });
+    if (!toggleBlockId) {
+      logger.warn("Toggle block not found, skipping items", { heading, items });
       continue;
-    }
-
-    // Find the next block after the heading that's NOT a to_do (or end of list)
-    // We want to insert before the next heading or other non-todo block
-    let insertBeforeBlockId: string | null = null;
-
-    for (let i = headingIndex + 1; i < blocks.length; i++) {
-      const block = blocks[i];
-      if ("type" in block && block.type !== "to_do") {
-        insertBeforeBlockId = block.id;
-        break;
-      }
     }
 
     // Create todo blocks
@@ -577,23 +569,11 @@ const addItemsToShoppingList = async (
       },
     }));
 
-    // If we found a block to insert before, use that; otherwise append to the page
-    if (insertBeforeBlockId) {
-      // Insert before the next block
-      for (const todoBlock of todoBlocks) {
-        await notion.blocks.children.append({
-          block_id: pageId,
-          children: [todoBlock],
-          after: headingBlockId,
-        });
-      }
-    } else {
-      // Append to the end of the page (after heading)
-      await notion.blocks.children.append({
-        block_id: pageId,
-        children: todoBlocks,
-      });
-    }
+    // Add items as children of the toggle block
+    await notion.blocks.children.append({
+      block_id: toggleBlockId,
+      children: todoBlocks,
+    });
 
     logger.success("Added items to shopping list", { heading, count: items.length });
   }

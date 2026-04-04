@@ -29,6 +29,12 @@ const isToDoBlock = (
   return 'type' in block && block.type === 'to_do';
 };
 
+const isToggleBlock = (
+  block: BlockResponse
+): block is BlockObjectResponse & { type: 'toggle' } => {
+  return 'type' in block && block.type === 'toggle';
+};
+
 const isHeading2Block = (
   block: BlockResponse
 ): block is BlockObjectResponse & { type: 'heading_2' } => {
@@ -65,6 +71,24 @@ interface TodoSearchResult {
   paragraphs: Array<BlockObjectResponse & { type: 'paragraph' }>;
 }
 
+const findTodoOrParagraphsAfterToggle = async (
+  toggleBlockId: string
+): Promise<TodoSearchResult> => {
+  const children = await getAllBlocks(notion, toggleBlockId);
+  const paragraphs: Array<BlockObjectResponse & { type: 'paragraph' }> = [];
+  let hasTodo = false;
+
+  for (const child of children) {
+    if (isParagraphBlock(child)) {
+      paragraphs.push(child);
+    } else if (isToDoBlock(child)) {
+      hasTodo = true;
+    }
+  }
+
+  return { hasTodo, paragraphs };
+};
+
 const findTodoOrParagraphsAfterHeading = (
   allBlocks: BlockResponse[],
   headingIndex: number
@@ -93,6 +117,34 @@ const findTodoOrParagraphsAfterHeading = (
   }
 
   return { hasTodo: false, paragraphs };
+};
+
+const addEmptyTodoInToggle = async (
+  toggleBlockId: string,
+  toggleBlock: BlockObjectResponse & { type: 'toggle' },
+  paragraphsToDelete: Array<BlockObjectResponse & { type: 'paragraph' }> = []
+): Promise<void> => {
+  for (const para of paragraphsToDelete) {
+    await notion.blocks.delete({ block_id: para.id });
+  }
+
+  await notion.blocks.children.append({
+    block_id: toggleBlockId,
+    children: [
+      {
+        type: 'to_do',
+        to_do: {
+          rich_text: [],
+          checked: false,
+        },
+      },
+    ],
+  });
+
+  const blockText =
+    (toggleBlock.toggle.rich_text?.map((t) => ('plain_text' in t ? t.plain_text : '')).join(' ')) ||
+    'section';
+  console.log(`Added empty to-do in toggle: ${blockText}`);
 };
 
 const addEmptyTodoAfterHeading = async (
@@ -124,6 +176,20 @@ const addEmptyTodoAfterHeading = async (
   console.log(`Added empty to-do under: ${blockText}`);
 };
 
+const processEmptyToggles = async (
+  allBlocks: BlockResponse[]
+): Promise<void> => {
+  for (const block of allBlocks) {
+    if (isToggleBlock(block)) {
+      const { hasTodo, paragraphs } = await findTodoOrParagraphsAfterToggle(block.id);
+
+      if (!hasTodo) {
+        await addEmptyTodoInToggle(block.id, block, paragraphs);
+      }
+    }
+  }
+};
+
 const processEmptyHeadings = async (
   parentBlockId: string,
   allBlocks: BlockResponse[]
@@ -148,12 +214,19 @@ const deleteCheckedTodos = async (parentBlockId: string): Promise<void> => {
   try {
     const allBlocks = await getAllBlocks(notion, parentBlockId);
 
+    // Delete checked todos in toggles
     for (const block of allBlocks) {
+      if (isToggleBlock(block)) {
+        const children = await getAllBlocks(notion, block.id);
+        for (const child of children) {
+          await deleteCheckedTodoBlock(child);
+        }
+      }
       await deleteCheckedTodoBlock(block);
       await processNestedBlocks(block);
     }
 
-    await processEmptyHeadings(parentBlockId, allBlocks);
+    await processEmptyToggles(allBlocks);
   } catch (error) {
     console.error('Error deleting checked todos:', error);
     throw error;
