@@ -262,8 +262,8 @@ const getHelperItems = async (): Promise<HelperItem[]> => {
         ? deleteProperty.checkbox
         : false;
 
-      const status = statusProperty?.type === "select"
-        ? (statusProperty.select?.name as "New" | "Processed" | "Staple" || "New")
+      const status = statusProperty?.type === "status"
+        ? (statusProperty.status?.name as "New" | "Processed" | "Staple" || "New")
         : "New";
 
       const mealId = mealProperty?.type === "relation"
@@ -343,7 +343,7 @@ const populateHelperDatabase = async (
             page_id: existingItem.id,
             properties: {
               Status: {
-                select: { name: "New" },
+                status: { name: "New" },
               },
               Meal: {
                 relation: [{ id: meal.id }],
@@ -397,6 +397,10 @@ const populateHelperDatabase = async (
   for (const { meal, ingredient } of ingredientsToAdd) {
     await notion.pages.create({
       parent: { database_id: SHOPPING_HELPER_DATABASE_ID },
+      icon: {
+        type: "emoji",
+        emoji: "🥚",
+      },
       properties: {
         Item: {
           title: [{ text: { content: ingredient } }],
@@ -414,7 +418,7 @@ const populateHelperDatabase = async (
           checkbox: false,
         },
         Status: {
-          select: { name: "New" },
+          status: { name: "New" },
         },
         Meal: {
           relation: [{ id: meal.id }],
@@ -691,7 +695,7 @@ const run = async () => {
 
     // Handle "Delete" checkbox
     if (item.delete) {
-      updates["Status"] = { select: { name: "Processed" } };
+      updates["Status"] = { status: { name: "Processed" } };
       updates["Delete"] = { checkbox: false };
       updates["Last processed"] = { date: { start: now } };
       shouldUpdate = true;
@@ -700,7 +704,7 @@ const run = async () => {
     }
     // Handle shopping list checkboxes
     else if (item.addToShoppingList || item.addToTurkishList || item.addToAsianList) {
-      updates["Status"] = { select: { name: "Processed" } };
+      updates["Status"] = { status: { name: "Processed" } };
       updates["Add to shopping list"] = { checkbox: false };
       updates["Add to Turkish supermarket shopping list"] = { checkbox: false };
       updates["Add to Asian supermarket shopping list"] = { checkbox: false };
