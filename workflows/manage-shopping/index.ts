@@ -73,7 +73,8 @@ interface HelperItem {
   addToTurkishList: boolean;
   addToAsianList: boolean;
   delete: boolean;
-  status: "New" | "Processed" | "Staple";
+  processingStatus: "New" | "Processed" | "Staple";
+  inventoryStatus?: "In Stock" | "Low stock" | "Out of stock";
   mealId?: string;
   createdTime: string;
   lastProcessed?: string;
@@ -238,7 +239,8 @@ const getHelperItems = async (): Promise<HelperItem[]> => {
       const turkishCheckboxProperty = page.properties["Add to Turkish supermarket shopping list"];
       const asianCheckboxProperty = page.properties["Add to Asian supermarket shopping list"];
       const deleteProperty = page.properties.Delete;
-      const statusProperty = page.properties.Status;
+      const processingStatusProperty = page.properties["Processing status"];
+      const inventoryStatusProperty = page.properties["Inventory status"];
       const mealProperty = page.properties.Meal;
       const lastProcessedProperty = page.properties["Last processed"];
 
@@ -262,9 +264,13 @@ const getHelperItems = async (): Promise<HelperItem[]> => {
         ? deleteProperty.checkbox
         : false;
 
-      const status = statusProperty?.type === "status"
-        ? (statusProperty.status?.name as "New" | "Processed" | "Staple" || "New")
+      const processingStatus = processingStatusProperty?.type === "status"
+        ? (processingStatusProperty.status?.name as "New" | "Processed" | "Staple" || "New")
         : "New";
+
+      const inventoryStatus = inventoryStatusProperty?.type === "status"
+        ? (inventoryStatusProperty.status?.name as "In Stock" | "Low stock" | "Out of stock" | undefined)
+        : undefined;
 
       const mealId = mealProperty?.type === "relation"
         ? mealProperty.relation[0]?.id
@@ -283,8 +289,8 @@ const getHelperItems = async (): Promise<HelperItem[]> => {
         addToTurkishList,
         addToAsianList,
         delete: deleteFlag,
-
-        status,
+        processingStatus,
+        inventoryStatus,
         mealId,
         createdTime,
         lastProcessed
@@ -326,10 +332,11 @@ const populateHelperDatabase = async (
       if (!existingItem) {
         // New ingredient - add it
         ingredientsToAdd.push({ meal, ingredient });
-      } else if (existingItem.status === "Staple") {
-        // Staple - skip entirely, don't update meal relation
+      } else if (existingItem.processingStatus === "Staple") {
+        // Staples remain as-is, never update them
+        // User manages inventory status manually
         logger.info("Skipping staple ingredient", { ingredient });
-      } else if (existingItem.status === "Processed") {
+      } else if (existingItem.processingStatus === "Processed") {
         // Check if it should be reset to New based on last processed date
         const lastProcessedDate = existingItem.lastProcessed
           ? new Date(existingItem.lastProcessed)
@@ -342,7 +349,7 @@ const populateHelperDatabase = async (
           await notion.pages.update({
             page_id: existingItem.id,
             properties: {
-              Status: {
+              "Processing status": {
                 status: { name: "New" },
               },
               Meal: {
@@ -371,7 +378,7 @@ const populateHelperDatabase = async (
           });
         }
       } else {
-        // Status is New - just update the meal relation to latest meal
+        // Processing status is New - just update the meal relation to latest meal
         ingredientsToUpdate.push({ item: existingItem, meal });
       }
     }
@@ -399,7 +406,7 @@ const populateHelperDatabase = async (
       parent: { database_id: SHOPPING_HELPER_DATABASE_ID },
       icon: {
         type: "emoji",
-        emoji: "🥚",
+        emoji: "🥫",
       },
       properties: {
         Item: {
@@ -417,7 +424,7 @@ const populateHelperDatabase = async (
         Delete: {
           checkbox: false,
         },
-        Status: {
+        "Processing status": {
           status: { name: "New" },
         },
         Meal: {
@@ -695,7 +702,7 @@ const run = async () => {
 
     // Handle "Delete" checkbox
     if (item.delete) {
-      updates["Status"] = { status: { name: "Processed" } };
+      updates["Processing status"] = { status: { name: "Processed" } };
       updates["Delete"] = { checkbox: false };
       updates["Last processed"] = { date: { start: now } };
       shouldUpdate = true;
@@ -704,7 +711,7 @@ const run = async () => {
     }
     // Handle shopping list checkboxes
     else if (item.addToShoppingList || item.addToTurkishList || item.addToAsianList) {
-      updates["Status"] = { status: { name: "Processed" } };
+      updates["Processing status"] = { status: { name: "Processed" } };
       updates["Add to shopping list"] = { checkbox: false };
       updates["Add to Turkish supermarket shopping list"] = { checkbox: false };
       updates["Add to Asian supermarket shopping list"] = { checkbox: false };
