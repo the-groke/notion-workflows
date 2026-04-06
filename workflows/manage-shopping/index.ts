@@ -208,30 +208,43 @@ const getUpcomingMeals = async (): Promise<Meal[]> => {
 
 // Get existing helper items (including all statuses, no archiving)
 const getHelperItems = async (): Promise<HelperItem[]> => {
-  // Fetch all non-archived pages (API defaults to archived=false)
-  const response = await fetch(
-    `https://api.notion.com/v1/databases/${SHOPPING_HELPER_DATABASE_ID}/query`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${NOTION_TOKEN}`,
-        "Notion-Version": "2022-06-28",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({}),
-    }
-  );
+  const allPages: PageObjectResponse[] = [];
+  let hasMore = true;
+  let startCursor: string | undefined = undefined;
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(`Failed to query helper database: ${error.message}`);
+  // Paginate through all results
+  while (hasMore) {
+    const response = await fetch(
+      `https://api.notion.com/v1/databases/${SHOPPING_HELPER_DATABASE_ID}/query`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${NOTION_TOKEN}`,
+          "Notion-Version": "2022-06-28",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          start_cursor: startCursor,
+        }),
+      }
+    );
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`Failed to query helper database: ${error.message}`);
+    }
+
+    const data = await response.json();
+    const pages = data.results.filter(
+      (page): page is PageObjectResponse => "properties" in page
+    );
+    allPages.push(...pages);
+
+    hasMore = data.has_more;
+    startCursor = data.next_cursor;
   }
 
-  const data = await response.json();
-  const pages = data.results;
-
-  return pages
-    .filter((page): page is PageObjectResponse => "properties" in page)
+  return allPages
     .map((page) => {
       const itemProperty = page.properties.Item;
       const groceryCheckboxProperty = page.properties["Add to shopping list"];
@@ -306,9 +319,22 @@ const populateHelperDatabase = async (
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
   // Build a map of existing ingredients by normalized name for quick lookup
+  // Also detect duplicates
   const existingItemsMap = new Map<string, HelperItem>();
+  const duplicates: string[] = [];
+
   for (const item of existingItems) {
-    existingItemsMap.set(item.item.toLowerCase(), item);
+    const normalized = item.item.toLowerCase();
+    if (existingItemsMap.has(normalized)) {
+      duplicates.push(item.item);
+    }
+    existingItemsMap.set(normalized, item);
+  }
+
+  if (duplicates.length > 0) {
+    logger.warn(`Found ${duplicates.length} duplicate ingredients in database`, {
+      duplicates: duplicates.slice(0, 10) // Show first 10
+    });
   }
 
   // Process each ingredient from upcoming meals
@@ -638,6 +664,7 @@ const run = async () => {
 
   logger.info("Updating ingredients database...");
   const existingHelperItems = await getHelperItems();
+  logger.info(`Fetched ${existingHelperItems.length} existing ingredients from database`);
   await populateHelperDatabase(upcomingMeals, existingHelperItems);
 
   // Step 2: Re-fetch items after populate to get updated state
