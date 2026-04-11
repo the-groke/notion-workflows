@@ -3,6 +3,7 @@ import 'dotenv/config';
 import {
   createNotionClient,
   getAllBlocks,
+  getAllPages,
 } from "utils/notion";
 import { logger } from "utils/logger";
 import { createAIClient, type AIClient } from "utils/ai";
@@ -605,6 +606,42 @@ const addItemsToShoppingList = async (
   }
 };
 
+// Set default icons for any entries missing them across meals, ingredients, and planner databases
+const setDefaultIcons = async (): Promise<void> => {
+  const MEAL_ICON = "🍲";
+  const INGREDIENT_ICON = "🥫";
+  const PLANNER_DAY_ICON = "📅";
+
+  logger.info("Setting default icons...");
+
+  const mealPages = await getAllPages(MEALS_DATABASE_ID, NOTION_TOKEN);
+  const mealPagesWithoutIcons = mealPages.filter((page) => !page.icon);
+  for (const page of mealPagesWithoutIcons) {
+    await notion.pages.update({ page_id: page.id, icon: { type: "emoji", emoji: MEAL_ICON } });
+  }
+  if (mealPagesWithoutIcons.length > 0) {
+    logger.success("Updated meals with icons", { count: mealPagesWithoutIcons.length });
+  }
+
+  const ingredientPages = await getAllPages(SHOPPING_HELPER_DATABASE_ID, NOTION_TOKEN);
+  const ingredientPagesWithoutIcons = ingredientPages.filter((page) => !page.icon);
+  for (const page of ingredientPagesWithoutIcons) {
+    await notion.pages.update({ page_id: page.id, icon: { type: "emoji", emoji: INGREDIENT_ICON } });
+  }
+  if (ingredientPagesWithoutIcons.length > 0) {
+    logger.success("Updated ingredients with icons", { count: ingredientPagesWithoutIcons.length });
+  }
+
+  const plannerPages = await getAllPages(MEAL_PLANNER_DATABASE_ID, NOTION_TOKEN);
+  const plannerPagesWithoutIcons = plannerPages.filter((page) => !page.icon);
+  for (const page of plannerPagesWithoutIcons) {
+    await notion.pages.update({ page_id: page.id, icon: { type: "emoji", emoji: PLANNER_DAY_ICON } });
+  }
+  if (plannerPagesWithoutIcons.length > 0) {
+    logger.success("Updated planner days with icons", { count: plannerPagesWithoutIcons.length });
+  }
+};
+
 // Process items for a specific shopping list type
 const processShoppingList = async (
   items: HelperItem[],
@@ -667,10 +704,13 @@ const run = async () => {
   logger.info(`Fetched ${existingHelperItems.length} existing ingredients from database`);
   await populateHelperDatabase(upcomingMeals, existingHelperItems);
 
-  // Step 2: Re-fetch items after populate to get updated state
+  // Step 2: Set default icons for any new entries
+  await setDefaultIcons();
+
+  // Step 3: Re-fetch items after populate to get updated state
   const updatedHelperItems = await getHelperItems();
 
-  // Step 3: Process items for each shopping list type
+  // Step 4: Process items for each shopping list type
   const groceryItems = updatedHelperItems.filter((item) => item.addToShoppingList);
   const turkishItems = updatedHelperItems.filter((item) => item.addToTurkishList);
   const asianItems = updatedHelperItems.filter((item) => item.addToAsianList);
@@ -698,7 +738,7 @@ const run = async () => {
     ASIAN_SUPERMARKET_LIST_PAGE_ID
   );
 
-  // Step 4: Process status updates based on user actions (no archiving)
+  // Step 5: Process status updates based on user actions (no archiving)
   const now = new Date().toISOString();
   let processedCount = 0;
   let stapleCount = 0;
